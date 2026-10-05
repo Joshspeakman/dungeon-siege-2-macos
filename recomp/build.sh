@@ -1,28 +1,27 @@
 #!/bin/bash
-# build.sh <DungeonSiege.exe> [outdir]
-# Recompile the user's own GOG or Steam 1.11.1 DungeonSiege.exe to arm64: analysis -> C -> libgame.dylib.
+# build.sh <DungeonSiege2.exe> [outdir]
+# Recompile the user's own GOG 2.3 DungeonSiege2.exe (and the Miles and Bink DLLs in its folder) to arm64:
+# analysis -> C -> libgame.dylib.
 # Everything generated is derived from the executable and stays local (work/ is git-ignored).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-EXE="${1:?usage: build.sh <DungeonSiege.exe> [outdir]}"; OUT="${2:-$HERE/work/full}"
-SHA=41f14b145e030f2decd95e9f434ccd1de0729ba13d1c5628c4bd9536ee938a02          # GOG 1.11.1
-SHA_STEAM=c408ef77b39484d8ad82ba17859cf1e60b24d3baf6d429283a52b886d67f33ab    # Steam 1.11.1 (app 39190): same build, no GOG fixes
-case "$(shasum -a 256 "$EXE" | cut -d' ' -f1)" in "$SHA"|"$SHA_STEAM") ;;
-  *) echo "not the original GOG or Steam 1.11.1 DungeonSiege.exe"; exit 1;; esac
+EXE="${1:?usage: build.sh <DungeonSiege2.exe> [outdir]}"; OUT="${2:-$HERE/work/full}"
+SHA=c17e1cc9e01b5d2439a92e06b905040379ad4bb8618b822582c46f5fa29db4e2          # GOG 2.3 (installer 37617)
+case "$(shasum -a 256 "$EXE" | cut -d' ' -f1)" in "$SHA") ;;
+  *) echo "not the original GOG 2.3 DungeonSiege2.exe"; exit 1;; esac
 PY="$HERE/.venv/bin/python"
 [ -x "$PY" ] || { python3 -m venv "$HERE/.venv" && "$HERE/.venv/bin/pip" install -q capstone==5.0.7 unicorn==2.1.4; }
 mkdir -p "$HERE/work"
-# three small executable patches (uncapped frame rate, cursor handling; tools/patch_exe.py)
-cp "$EXE" "$HERE/work/DungeonSiege.exe" && python3 "$HERE/tools/patch_exe.py" "$HERE/work/DungeonSiege.exe" >/dev/null
-EXE="$HERE/work/DungeonSiege.exe"
+cp "$EXE" "$HERE/work/DungeonSiege2.exe"                  # a copy (no patches so far)
+EXE="$HERE/work/DungeonSiege2.exe"
 echo "== analysis"; "$PY" "$HERE/tools/analyze.py" "$EXE" "$HERE/work/analysis.json" | head -6
 echo "== lifting";  "$PY" "$HERE/tools/lift.py" "$EXE" "$HERE/work/analysis.json" "$OUT"
-# the Miles Sound System the game ships (Mss32.dll and the providers it loads), recompiled the same way; game folder
-# paths, so the build needs the folder the executable came from
+# the Miles Sound System the game ships (system/mss32.dll and the providers it loads) and Bink, recompiled the same way;
+# game folder paths, so the build needs the folder the executable came from. Msseax.m3d (hardware EAX) is left out.
 GAME="$(cd "$(dirname "$1")" && pwd)"; IMGS=("=")
-if [ -f "$GAME/Mss32.dll" ]; then
+if [ -f "$GAME/system/mss32.dll" ]; then
   mkdir -p "$HERE/work/miles"; NIMP=$("$PY" -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["imports"]))' "$OUT/image.json")
-  for rel in Mss32.dll system/mss/Mssfast.m3d system/mss/Mp3dec.asi BinkW32.dll; do
+  for rel in system/mss32.dll system/mss/msssoft.m3d system/mss/mssmp3.asi system/mss/mssdsp.flt system/binkw32.dll; do
     tag=$(basename "$rel" | tr . _); [ -f "$GAME/$rel" ] || { echo "missing $GAME/$rel"; exit 1; }
     "$PY" "$HERE/tools/analyze.py" "$GAME/$rel" "$HERE/work/miles/$tag.json" | head -1
     "$PY" "$HERE/tools/lift.py" "$GAME/$rel" "$HERE/work/miles/$tag.json" "$OUT" --tag "$tag" --imp-base "$NIMP" | grep -E 'lifted|internal'
