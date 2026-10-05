@@ -18,13 +18,7 @@ CC = {'o': 'CC_O', 'no': 'CC_NO', 'b': 'CC_B', 'ae': 'CC_AE', 'e': 'CC_E', 'ne':
       's': 'CC_S', 'ns': 'CC_NS', 'p': 'CC_P', 'np': 'CC_NP', 'l': 'CC_L', 'ge': 'CC_GE', 'le': 'CC_LE', 'g': 'CC_G'}
 # Points where the native build adds behaviour (runtime/win32/hooks.c). Each is an instruction boundary; the hook sees
 # the registers and memory as the original code would, and does nothing unless its feature is turned on.
-HOOKS = {
-    0x0059000f: 'mood loaded: scale fog and frustum (draw distance)',
-    0x0061d06c: 'Skrit compiler message (this, level, format, ...): printed with DS_SKRITLOG=1',
-    0x004acb46: 'FuBi enum spec constructed: Legends of Aranna extends eJobAbstractType',
-    0x005d1fcf: 'GoMind template jobs loaded: Legends of Aranna adds jat_approach',
-    0x004036a8: 'FuBi enum spec constructed (second copy): Legends of Aranna extends eQueryTrait',
-    0x005a39a6: 'enchantment update: category of the alteration (Legends of Aranna values)',
+HOOKS = {                 # address: description (runtime/win32/hooks.c rt_hook); none yet for Dungeon Siege II
 }
 JUNK = {'in', 'out', 'insb', 'insd', 'insw', 'outsb', 'outsd', 'outsw', 'iretd', 'hlt', 'cli', 'sti', 'int1', 'into',
         'int', 'aaa', 'aas', 'aam', 'aad', 'daa', 'das', 'salc', 'les', 'lds', 'retf', 'ljmp', 'lcall', 'arpl', 'bound',
@@ -33,55 +27,7 @@ JUNK = {'in', 'out', 'insb', 'insd', 'insw', 'outsb', 'outsd', 'outsw', 'iretd',
 
 # Functions a native implementation can take over (runtime/win32/hooks.c rt_override): at the function's first
 # instruction the runtime may perform the whole call (including the return) itself.
-OVERRIDES = {
-    0x005338e9: 'Quat::RotateVector (native, runtime/win32/native.c)',
-    0x00694970: 'Quat slerp (native, runtime/win32/native.c)',
-    0x005d2679: 'GoMind::RSDoJob (mpfeel: a joiner\'s orders)',
-    0x005fbb3c: 'GoFollower::Update (mpfeel: playback on joiners)',
-    0x005faf98: 'GoFollower: one plan update unpacked (mpfeel)',
-    0x00574789: 'WorldTime::RCSetServerTime (joiners: latency-aware, smooth)',
-    0x005fae2e: 'GoFollower::RCSendPackedUpdateToFollowers (mpfeel: host side)',
-    0x00565464: 'Server: planner lag (from the network round trip on a Mac host)',
-    0x0057470d: 'WorldTime::Update (a joiner\'s clock follows the host smoothly)',
-    0x0041aea9: 'crc32 (W32_CRCLOG: FuBi digest inputs)',
-    0x0042cda8: 'report formatter (DS_REPORTLOG: the engine\'s warnings)',
-    0x00435d1d: 'module file checksum + crc (FuBi digest; Steam edition identity)',
-    0x004b7d69: 'default Shadows setting (All Complex on every Mac)',
-    0x00517017: 'paper doll camera for the screen size (any resolution, not only the listed ones)',
-    0x005cfa0d: 'ToString(eJobAbstractType)',
-    0x005cfa1e: 'FromString(const char*, eJobAbstractType&)',
-    0x005cfa33: 'job type flag mask',
-    0x0051f739: 'ToString(eQueryTrait)',
-    0x005e179b: 'AIQuery::Is(Go const*, Go const*, eQueryTrait)',
-    0x006dec5c: 'UIShell::ShowInterface(const gpstring&)',
-    0x006dee75: 'UIShell::ShowGroup(const char*, bool, bool, const char*)',
-    0x005d281f: 'GoMind::SDoJob(const JobReq&)',
-    0x005abf1e: 'Rules::ChangeLife(Goid, float, DWORD)',
-    0x004f0b34: 'UIGame GUI callback (const gpstring& message, UIWindow&)',
-    0x004e72f3: 'UIGame: publish the in-game key commands to the input binder',
-    0x00533eb3: 'GoAspect::Xfer(PersistContext&)',
-    0x004997d7: 'UIGame: the campaign is won (end-of-game dialog)',
-    0x004b8f1b: 'UIOptions: options screen commands (const gpstring&, UIWindow&)',
-    0x004e21c1: 'UIIntro: interface messages (const gpstring&, UIWindow&)',
-    0x004e2435: 'UIIntro: a beat is over',
-    0x006fcf19: 'Messenger::Notify(const gpstring&, UIWindow*): every interface command',
-    0x0069c1be: 'nema::Blender::Update(float dt)',
-    0x0060e5fa: 'formula evaluation (const char* formula, ...)',
-    0x005a2c1d: 'FromString(const char*, eAlteration&)',
-    0x005a2c0e: 'ToString(eAlteration)',
-    0x005cde38: 'GoMagic: mana cost of a spell (Go* caster, Go* target, bool)',
-    0x005a8af3: 'Rules::GetDamageRange(Goid, Goid, float&, float&, bool)',
-    0x005c5515: 'GoAttack::GetAttackRange()',
-    0x005a97b8: 'Rules: damage a Go (victim, attacker, weapon, amount, ...)',
-    0x004ff967: 'UIInventoryManager: an inventory item is used (right click)',
-    0x0043b01e: 'InputBinder: handle a key',
-    0x0062e80b: 'sound: play a sample (2D)',
-    0x0062eae8: 'sound: play a sample (positional)',
-    0x0062ee57: 'sound: play a stream',
-    0x005a4d17: 'Enchantment: apply its alteration',
-    0x005a6417: 'Enchantment: move skill points (from, to, amount)',
-    0x004e271b: 'UIIntro: start the intro (bool: with the logos)',
-    0x00412d12: 'ReportSys::Context::OutputF(fmt, ...)',
+OVERRIDES = {             # address: description (runtime/win32/hooks.c rt_override); none yet for Dungeon Siege II
 }
 
 class Unsupported(Exception): pass
@@ -230,7 +176,7 @@ class Lifter:
             if p == va and len(chain) >= n: return chain[-n:]
         return []
 
-    SEH_HANDLER3 = 0x40a020                         # _except_handler3 (MSVC 6 C runtime)
+    SEH_HANDLER3 = 0                                # _except_handler3 of the C runtime: found per executable (main())
     def seh_handlers(self, insns):
         """__except block addresses from the scope table pushed in the SEH prologue (push table; push _except_handler3)"""
         order = sorted(insns); out = []
@@ -537,6 +483,11 @@ class Lifter:
             fn = '__atomic_add_fetch' if mn == 'inc' else '__atomic_sub_fetch'
             return '{ uint32_t ea = %s; uint32_t r = %s((%s *)(M + ea), (%s)1, __ATOMIC_SEQ_CST); f.cin = flag_cf(&f); LF(%s, %s, (%s & %s), 1, r); }' % (
                 self.addr(i, o[0]), fn, t, t, 'LF_INC' if mn == 'inc' else 'LF_DEC', SZ[sz], 'r - 1u' if mn == 'inc' else 'r + 1u', MASK[sz])
+        if mn == 'cmpxchg' and o[0].type == X.X86_OP_MEM and o[0].size == 4 and o[1].type == X.X86_OP_REG:
+            # compare eax with [ea]: equal -> [ea] = src (ZF set); not equal -> eax = [ea] (ZF clear); flags as cmp eax, [ea]
+            return ('{ uint32_t ea = %s, src = %s, exp = eax, old = exp; '
+                    '(void)__atomic_compare_exchange_n((uint32_t *)(M + ea), &old, src, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); '
+                    'LF(LF_SUB, %d, exp, old, exp - old); eax = old; }') % (self.addr(i, o[0]), self.rd(i, o[1]), SZ[4])
         raise Unsupported('lock ' + mn)
 
     def string(self, mn, rep):
@@ -672,6 +623,13 @@ def find_cycles(L):
         if v not in idx: sc(v)
     return sccs
 
+def find_except_handler3(path):
+    """_except_handler3: the handler most SEH prologues push (push -1; push scope table; push handler; mov eax, fs:[0]).
+    DS1 (MSVC 6): 0x40a020, 40 uses; DS2 (MSVC 7.1): 0xa2ad14, 30 uses."""
+    d = open(path, 'rb').read(); c = collections.Counter()
+    for m in re.finditer(rb'\x6a\xff\x68....\x68(....)\x64\xa1\x00\x00\x00\x00', d, re.S): c[struct.unpack('<I', m.group(1))[0]] += 1
+    return c.most_common(1)[0][0] if c else 0
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('exe'); ap.add_argument('analysis'); ap.add_argument('outdir')
@@ -683,6 +641,7 @@ def main():
     L = Lifter(a.exe, a.analysis); L.jt_cache = {}
     L.imp_index = {va: a.imp_base + k for k, (va, _) in enumerate(L.imports)}
     L.illegal_seh = bool(a.tag)
+    if not a.tag: L.SEH_HANDLER3 = find_except_handler3(a.exe)      # (DLLs keep the DS1 behaviour: CPU-check paths only)
     L.hooks = {} if a.tag else dict(HOOKS)
     L.overrides = {} if a.tag else dict(OVERRIDES)
     # development: DS_TRACE_HOOKS="0x48bf51,0x713158" adds hooks that log registers and stack arguments (DS_HOOKTRACE=1)

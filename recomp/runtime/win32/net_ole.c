@@ -37,9 +37,6 @@ IMPL(wsock32, ord52)
             freeifaddrs(ifs);
         }
         if (!n) addrs[n++] = htonl(INADDR_LOOPBACK);
-        uint32_t portmap_public_ip(void); uint32_t pub = getenv("DS_NO_PORTMAP") ? 0 : portmap_public_ip();   /* for internet players */
-        int dup = 0; for (int i = 0; i < n; i++) if (addrs[i] == pub) dup = 1;
-        if (pub && !dup && n < 16) { memmove(addrs + 1, addrs, sizeof *addrs * (size_t)n); addrs[0] = pub; n++; }   /* first: the one to give out */
     } else {
         struct addrinfo hint = {0}, *res = 0; hint.ai_family = AF_INET;
         if (getaddrinfo(name, 0, &hint, &res)) RET(0, 1);
@@ -71,9 +68,6 @@ IMPL(ole32, CoUninitialize) { RET(0, 0); }
 IMPL(ole32, CoCreateInstance)
 {
     uint32_t clsid = ARG(0), out = ARG(4);
-    uint32_t w32_dpnet_create(uint32_t clsid_first_dword);
-    uint32_t obj = w32_dpnet_create(rt_r32(G_MEM, clsid));           /* DirectPlay 8 client, server, address */
-    if (obj) { if (out) rt_w32(G_MEM, out, obj); RET(0, 5); }
     fprintf(stderr, "w32: CoCreateInstance({%08x-...}) -> class not registered\n", rt_r32(G_MEM, clsid));
     if (out) rt_w32(G_MEM, out, 0);
     RET(0x80040154u, 5);

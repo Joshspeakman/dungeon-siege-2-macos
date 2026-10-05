@@ -203,6 +203,19 @@ IMPL(kernel32, MoveFileA)
     if (rename(a, b)) { w32_set_last_error(c, 2); RET(0, 2); }
     RET(1, 2);
 }
+IMPL(kernel32, CopyFileA)                     /* (src, dst, fail if it exists): written into the overlay like any write */
+{
+    char a[2048], b[2048]; struct stat st;
+    if (host(c, ARG(0), a, 0) || host(c, ARG(1), b, 1)) RET(0, 3);
+    if (!writable_path(b)) { w32_set_last_error(c, 5); RET(0, 3); }
+    if (ARG(2) && !stat(b, &st)) { w32_set_last_error(c, 80); RET(0, 3); }     /* ERROR_FILE_EXISTS */
+    int in = open(a, O_RDONLY); if (in < 0) { w32_set_last_error(c, 2); RET(0, 3); }
+    int out = open(b, O_WRONLY | O_CREAT | O_TRUNC, 0644); if (out < 0) { close(in); w32_set_last_error(c, 5); RET(0, 3); }
+    char buf[65536]; ssize_t n; int ok = 1;
+    while ((n = read(in, buf, sizeof buf)) > 0) if (write(out, buf, (size_t)n) != n) { ok = 0; break; }
+    if (n < 0) ok = 0;
+    close(in); close(out); RET(ok, 3);
+}
 IMPL(kernel32, GetDriveTypeA) { RET(3, 1); }                              /* DRIVE_FIXED */
 IMPL(kernel32, GetLogicalDriveStringsA)
 {

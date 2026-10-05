@@ -87,3 +87,64 @@ IMPL(advapi32, RegSetValueExA)
     pthread_mutex_unlock(&rlock);
     RET(0, 6);
 }
+/* (added for Dungeon Siege II) */
+static int is_child(const char *parent, const char *path, const char **name)   /* path is a direct subkey of parent */
+{
+    size_t l = strlen(parent);
+    if (strncmp(path, parent, l) || path[l] != '\\' || strchr(path + l + 1, '\\')) return 0;
+    *name = path + l + 1; return 1;
+}
+IMPL(advapi32, RegDeleteValueA)
+{
+    RKey *k = key_of(ARG(0)); if (!k) RET(6, 2);
+    const char *n = ARG(1) ? GS(ARG(1)) : "";
+    pthread_mutex_lock(&rlock);
+    for (int j = 0; j < k->nv; j++) if (!strcasecmp(k->v[j].name, n)) {
+        free(k->v[j].data); k->v[j] = k->v[--k->nv]; pthread_mutex_unlock(&rlock); RET(0, 2);
+    }
+    pthread_mutex_unlock(&rlock); RET(2, 2);
+}
+IMPL(advapi32, RegDeleteKeyA)                          /* only a key without subkeys, as on Windows */
+{
+    char p[1024]; const char *nm;
+    pthread_mutex_lock(&rlock);
+    RKey *k = full_path(ARG(0), GS(ARG(1)), p, sizeof p) ? 0 : lookup(p, 0);
+    if (!k) { pthread_mutex_unlock(&rlock); RET(2, 2); }
+    for (int j = 0; j < nkeys; j++) if (is_child(p, keys[j]->path, &nm)) { pthread_mutex_unlock(&rlock); RET(5, 2); }
+    for (int j = 0; j < nkeys; j++) if (keys[j] == k) { keys[j] = keys[--nkeys]; break; }
+    for (int i = 0; i < 256; i++) if (rh[i] == k) rh[i] = 0;
+    for (int v = 0; v < k->nv; v++) free(k->v[v].data);
+    free(k->v); free(k);
+    pthread_mutex_unlock(&rlock); RET(0, 2);
+}
+IMPL(advapi32, RegEnumKeyExA)                          /* (h, index, name, *namelen, reserved, class, *classlen, *time) */
+{
+    RKey *k = key_of(ARG(0)); uint32_t idx = ARG(1), name = ARG(2), lenp = ARG(3); const char *nm;
+    if (!k) RET(6, 8);
+    pthread_mutex_lock(&rlock);
+    uint32_t n = 0;
+    for (int j = 0; j < nkeys; j++) if (is_child(k->path, keys[j]->path, &nm) && n++ == idx) {
+        uint32_t l = (uint32_t)strlen(nm);
+        if (rt_r32(G_MEM, lenp) <= l) { pthread_mutex_unlock(&rlock); RET(234, 8); }   /* ERROR_MORE_DATA */
+        memcpy(GP(name), nm, l + 1); rt_w32(G_MEM, lenp, l);
+        if (ARG(6)) rt_w32(G_MEM, ARG(6), 0);
+        if (ARG(7)) { rt_w32(G_MEM, ARG(7), 0); rt_w32(G_MEM, ARG(7) + 4, 0); }
+        pthread_mutex_unlock(&rlock); RET(0, 8);
+    }
+    pthread_mutex_unlock(&rlock); RET(259, 8);         /* ERROR_NO_MORE_ITEMS */
+}
+IMPL(advapi32, RegQueryInfoKeyA)                       /* (h, class, *classlen, reserved, *subkeys, *maxsubkeylen, *maxclasslen,
+                                                        *values, *maxvaluenamelen, *maxvaluelen, *secdesc, *time) */
+{
+    RKey *k = key_of(ARG(0)); const char *nm; if (!k) RET(6, 12);
+    pthread_mutex_lock(&rlock);
+    uint32_t nsub = 0, maxsub = 0, maxvn = 0, maxv = 0;
+    for (int j = 0; j < nkeys; j++) if (is_child(k->path, keys[j]->path, &nm)) { nsub++; if (strlen(nm) > maxsub) maxsub = (uint32_t)strlen(nm); }
+    for (int v = 0; v < k->nv; v++) { if (strlen(k->v[v].name) > maxvn) maxvn = (uint32_t)strlen(k->v[v].name); if (k->v[v].size > maxv) maxv = k->v[v].size; }
+    pthread_mutex_unlock(&rlock);
+    uint32_t out[] = {ARG(4), nsub, ARG(5), maxsub, ARG(6), 0, ARG(7), (uint32_t)k->nv, ARG(8), maxvn, ARG(9), maxv, ARG(10), 0};
+    for (int i = 0; i < 14; i += 2) if (out[i]) rt_w32(G_MEM, out[i], out[i + 1]);
+    if (ARG(2)) rt_w32(G_MEM, ARG(2), 0);
+    if (ARG(11)) { rt_w32(G_MEM, ARG(11), 0); rt_w32(G_MEM, ARG(11) + 4, 0); }
+    RET(0, 12);
+}
