@@ -217,9 +217,7 @@ IMPL(winhttp, WinHttpSetStatusCallback) { RET(0, 4); }
 /* ---- Direct3D 9 and D3DX: the next step (docs/PLAN.md); for now the game is told Direct3D 9 isn't there ---- */
 /* (E_FAIL until written) */
 IMPL(d3dx9_29, D3DXCompileShader) TODO_BODY("d3dx9!D3DXCompileShader", 10, 0x80004005u)
-IMPL(d3dx9_29, D3DXCreateEffect) TODO_BODY("d3dx9!D3DXCreateEffect", 9, 0x80004005u)
 IMPL(d3dx9_29, D3DXFillCubeTextureTX) TODO_BODY("d3dx9!D3DXFillCubeTextureTX", 2, 0x80004005u)
 IMPL(d3dx9_29, D3DXFillTextureTX) TODO_BODY("d3dx9!D3DXFillTextureTX", 2, 0x80004005u)
 IMPL(d3dx9_29, D3DXFillVolumeTextureTX) TODO_BODY("d3dx9!D3DXFillVolumeTextureTX", 2, 0x80004005u)
-IMPL(d3dx9_29, D3DXGetShaderInputSemantics) TODO_BODY("d3dx9!D3DXGetShaderInputSemantics", 3, 0x80004005u)
 IMPL(shfolder, SHGetFolderPathW) { void imp_shell32_SHGetFolderPathW(Ctx *); imp_shell32_SHGetFolderPathW(c); }   /* also looked up there */

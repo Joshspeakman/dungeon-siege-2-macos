@@ -39,6 +39,9 @@ void hlsl_free(HFx *fx);
 int hlsl_type_regs(const HFx *fx, HType t);           /* float4 registers a parameter of this type occupies */
 int hlsl_type_floats(const HFx *fx, HType t);         /* floats of its value (rows*cols per element) */
 int hlsl_eval_init(HFx *fx, HVar *v);                  /* default value from the initializer into v->defval */
+int hlsl_eval(HFx *fx, HExpr *e, float *out, int cap); /* a constant expression (state values); count of floats, 0 if not constant */
+int hlsl_expr_is_float(const HExpr *e);                /* of float type (a state value whose bits are a float) */
+const char *hlsl_expr_string(const HExpr *e);          /* a string literal's text, else NULL */
 
 /* One pass compiled to a Metal program: vertex function "vs_fx", fragment function "fs_fx". The parameters it reads
  * are in one buffer of float4 registers (preg[i]: first register of global i, -1 when unused); its samplers are bound
@@ -46,7 +49,7 @@ int hlsl_eval_init(HFx *fx, HVar *v);                  /* default value from the
 typedef struct HProgram {
     char *msl; size_t msl_len;
     int *preg; int nregs;                              /* per global */
-    int sslot[16]; int nsamp;
+    int sslot[16]; int nsamp; int skind[16];          /* skind: HS_2D, HS_CUBE or HS_3D per slot */
     int vs_ffp, ps_ffp;                                /* fixed-function stages generated */
     char err[512];
 } HProgram;
