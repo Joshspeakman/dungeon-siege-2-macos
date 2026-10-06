@@ -29,7 +29,8 @@ JUNK = {'in', 'out', 'insb', 'insd', 'insw', 'outsb', 'outsd', 'outsw', 'iretd',
 
 # Functions a native implementation can take over (runtime/win32/hooks.c rt_override): at the function's first
 # instruction the runtime may perform the whole call (including the return) itself.
-OVERRIDES = {             # address: description (runtime/win32/hooks.c rt_override); none yet for Dungeon Siege II
+OVERRIDES = {             # address: description (runtime/win32/hooks.c rt_override)
+    0x0067aeb6: '3x3 matrix times vector (terrain vertices): done natively (native.c)',
 }
 
 class Unsupported(Exception): pass
