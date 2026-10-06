@@ -27,6 +27,10 @@ This recompiles the game (a few minutes) and installs **Dungeon Siege II Native*
 and logs live in `~/Games/DungeonSiege2Native`. The launch window picks the resolution, view distance and frame rate, takes a CD key for online play, and offers
 updates: it rebuilds the app from the newest version of this repository and your own copy of the game.
 
+**Test Lab** (the launch window's middle button): the game in a window beside a panel that travels anywhere in the
+map, spawns enemies, gives gear and casts every spell and power, with a record of each test, on copies of your saves.
+From the Linux port; see [docs/TEST-LAB.md](docs/TEST-LAB.md).
+
 `./install.sh --nightly` installs **Dungeon Siege II Nightly** next to it, built from the `nightly` branch (experimental
 work), sharing the same saves and settings.
 

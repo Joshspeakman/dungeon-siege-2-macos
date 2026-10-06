@@ -103,10 +103,10 @@ static NSFont *cp(CGFloat size, BOOL bold)
 @interface DSLaunchView : NSView
 @property NSArray<DSRow *> *rows; @property NSInteger focus; @property NSInteger hover; @property NSInteger pressed;
 @property NSImage *stone, *plaque, *trim, *wood, *woodHover, *woodDown, *logo; @property NSString *note;
-@property (copy) void (^onPlay)(void); @property (copy) void (^onQuit)(void); @property (copy) void (^onChange)(void);
+@property (copy) void (^onPlay)(void); @property (copy) void (^onQuit)(void); @property (copy) void (^onChange)(void); @property (copy) void (^onLab)(void);
 @end
 
-enum { HIT_NONE = -1, HIT_PLAY = 100, HIT_QUIT = 101 };   /* rows: 10*row + 0 (left arrow) / 1 (value) / 2 (right arrow) */
+enum { HIT_NONE = -1, HIT_PLAY = 100, HIT_QUIT = 101, HIT_LAB = 102 };   /* rows: 10*row + 0 (left arrow) / 1 (value) / 2 (right arrow) */
 
 @implementation DSLaunchView
 - (BOOL)isFlipped { return YES; }
@@ -115,12 +115,14 @@ enum { HIT_NONE = -1, HIT_PLAY = 100, HIT_QUIT = 101 };   /* rows: 10*row + 0 (l
 - (NSRect)rowRect:(NSInteger)k { return NSMakeRect(70, 196 + 74 * k, self.bounds.size.width - 140, 64); }
 - (NSRect)arrow:(NSInteger)k right:(BOOL)right { NSRect r = [self rowRect:k]; return NSMakeRect(right ? NSMaxX(r) - 34 : NSMaxX(r) - 330, r.origin.y + 6, 30, 30); }
 - (NSRect)valueRect:(NSInteger)k { NSRect r = [self rowRect:k]; return NSMakeRect(NSMaxX(r) - 300, r.origin.y + 9, 262, 30); }
-- (NSRect)playRect { NSRect b = self.bounds; return NSMakeRect(NSMidX(b) + 12, b.size.height - 84, 220, 56); }
-- (NSRect)quitRect { NSRect b = self.bounds; return NSMakeRect(NSMidX(b) - 232, b.size.height - 84, 220, 56); }
+- (NSRect)playRect { NSRect b = self.bounds; return NSMakeRect(NSMidX(b) + 116, b.size.height - 84, 200, 56); }
+- (NSRect)labRect { NSRect b = self.bounds; return NSMakeRect(NSMidX(b) - 100, b.size.height - 84, 200, 56); }
+- (NSRect)quitRect { NSRect b = self.bounds; return NSMakeRect(NSMidX(b) - 316, b.size.height - 84, 200, 56); }
 - (NSInteger)hit:(NSPoint)p
 {
     if (NSPointInRect(p, self.playRect)) return HIT_PLAY;
     if (NSPointInRect(p, self.quitRect)) return HIT_QUIT;
+    if (NSPointInRect(p, self.labRect)) return HIT_LAB;
     for (NSInteger k = 0; k < (NSInteger)self.rows.count; k++) {
         if (NSPointInRect(p, [self arrow:k right:NO])) return 10 * k;
         if (NSPointInRect(p, [self arrow:k right:YES])) return 10 * k + 2;
@@ -141,6 +143,7 @@ enum { HIT_NONE = -1, HIT_PLAY = 100, HIT_QUIT = 101 };   /* rows: 10*row + 0 (l
     if (h != p || h == HIT_NONE) return;
     if (h == HIT_PLAY) { if (self.onPlay) self.onPlay(); return; }
     if (h == HIT_QUIT) { if (self.onQuit) self.onQuit(); return; }
+    if (h == HIT_LAB) { if (self.onLab) self.onLab(); return; }
     NSInteger k = h / 10; self.focus = k;
     if (self.rows[k].activate) { self.rows[k].activate(); self.needsDisplay = YES; return; }
     [self step:k by:(h % 10 == 0) ? -1 : 1];
@@ -266,6 +269,7 @@ static void draw_text(NSString *s, NSFont *f, NSColor *c, NSRect r, NSTextAlignm
     }
     if (self.note.length) draw_text(self.note, cp(11, NO), dim(), NSMakeRect(54, NSMaxY(panel) + 10, b.size.width - 108, 30), NSTextAlignmentCenter, nil);
     [self drawButton:self.quitRect title:@"QUIT" code:HIT_QUIT primary:NO];
+    [self drawButton:self.labRect title:@"TEST LAB" code:HIT_LAB primary:NO];
     [self drawButton:self.playRect title:@"PLAY" code:HIT_PLAY primary:YES];
 }
 @end
@@ -569,6 +573,18 @@ int ds_launcher_run(const char *game_dir, const char *data_dir)
     __block int result = 0;
     v.onPlay = ^{ result = 1; [NSApp stopModal]; };
     v.onQuit = ^{ result = 0; [NSApp stopModal]; };
+    v.onLab = ^{   /* 2: the Test Lab with its saves as they are; 3: fresh copies of the single-player saves first */
+        NSString *saves = [data stringByAppendingPathComponent:@"test-lab/drive_c/Users/player/Documents/My Games/Dungeon Siege 2/Save/SinglePlayer"];
+        BOOL have = [NSFileManager.defaultManager fileExistsAtPath:saves];
+        NSAlert *a = [NSAlert new]; a.messageText = @"Start the Test Lab?";
+        a.informativeText = have ? @"The game opens in a window beside the Test Lab's controls, with the lab's own copies of your single-player saves (yours are never changed). "
+                                    "Fresh copies replace the lab's saves with your current ones; the earlier lab saves are kept in test-lab/save-backups."
+                                 : @"The game opens in a window beside the Test Lab's controls. Your single-player saves are copied for the lab first; yours are never changed.";
+        [a addButtonWithTitle:@"Start"]; if (have) [a addButtonWithTitle:@"Fresh Save Copies, Then Start"]; [a addButtonWithTitle:@"Cancel"];
+        NSModalResponse r = [a runModal];
+        if (r == NSAlertFirstButtonReturn) result = have ? 2 : 3; else if (have && r == NSAlertSecondButtonReturn) result = 3; else return;
+        [NSApp stopModal];
+    };
     [[NSNotificationCenter defaultCenter] addObserverForName:NSWindowWillCloseNotification object:w queue:nil usingBlock:^(NSNotification *n) { (void)n; [NSApp stopModal]; }];
     [NSApp activateIgnoringOtherApps:YES];
     [w makeKeyAndOrderFront:nil];
@@ -579,5 +595,5 @@ int ds_launcher_run(const char *game_dir, const char *data_dir)
     NSString *dv = dist.choices[dist.index][@"value"];
     [@{@"resolution": rv, @"viewDistance": dv, @"frameRate": fv} writeToFile:plistPath atomically:YES];
     apply(rv, dv, fv);
-    return 1;
+    return result;
 }
