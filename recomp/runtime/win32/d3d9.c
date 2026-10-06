@@ -536,7 +536,16 @@ M(dv_GetNumberOfSwapChains, 1) RET(1, 1); END
 static uint32_t dev_reset(Dev9 *d, uint32_t pp);
 M(dv_Reset, 2) DEV_ME RET(dev_reset(me, ARG(1)), 2); END
 static void cursor_overlay(Dev9 *d);
-static void dev_present(Ctx *c, Dev9 *d) { cursor_overlay(d); dsr_present(c, d->back->id); }
+static void dev_present(Ctx *c, Dev9 *d)
+{
+    cursor_overlay(d); dsr_present(c, d->back->id);
+    static int fps = -1; if (fps < 0) fps = getenv("D3D9_FPS") != 0;   /* D3D9_FPS=1: frames per second every 2 s */
+    if (fps) {
+        static double t0; static int n; struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+        double t = ts.tv_sec + ts.tv_nsec / 1e9; n++;
+        if (!t0) t0 = t; else if (t - t0 >= 2) { fprintf(stderr, "d3d9: %.1f fps\n", n / (t - t0)); t0 = t; n = 0; }
+    }
+}
 M(dv_Present, 5) DEV_ME dev_present(c, me); RET(D3D_OK, 5); END
 M(dv_GetBackBuffer, 5) DEV_ME                          /* (swap chain, index, type, surface) */
     if (ARG(1) || ARG(2)) RET(D3DERR_INVALIDCALL, 5);

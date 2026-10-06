@@ -76,8 +76,6 @@ IMPL(user32, GetWindowThreadProcessId)
     if (ARG(1)) rt_w32(G_MEM, ARG(1), tid ? 1 : 0);
     RET(tid, 2);
 }
-IMPL(user32, SetTimer) { fprintf(stderr, "w32: SetTimer(%#x, %u, %u ms) ignored\n", ARG(0), ARG(1), ARG(2)); RET(ARG(1) ? ARG(1) : 1, 4); }
-IMPL(user32, KillTimer) { RET(1, 2); }
 /* wsprintfA (cdecl): %[-][0][width][.prec][l|h]{d,i,u,x,X,c,s} and %% */
 uint32_t w32_format(char *out, size_t cap, const char *f, uint32_t va)
 {
