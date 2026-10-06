@@ -21,8 +21,9 @@ static Surf9 *surf_new(Dev9 *d, uint32_t w, uint32_t h, uint32_t fmt, uint32_t u
     s->pitch = d9_pitch(fmt, s->w); s->size = s->pitch * d9_rows(fmt, s->h); s->mem = gmem(s->size);
     s->g = make_iface(O9_SURF, s); s->id = next_object_id();
     if (pool != 2 && pool != 3) {                       /* SYSTEMMEM / SCRATCH surfaces have no GPU copy */
-        uint32_t *p = cmd_begin(DSR_SURFACE_CREATE, 32);
+        uint32_t *p = cmd_begin(DSR_SURFACE_CREATE, 40);
         p[0] = s->id; p[1] = s->w; p[2] = s->h; p[3] = (uint32_t)kind; p[4] = (uint32_t)fmt_code(fmt); p[5] = parent_id; p[6] = level; p[7] = levels;
+        p[8] = face; p[9] = tex && tex->type == O9_CUBE ? 1 : 0;
         cmd_end();
     }
     return s;
@@ -130,7 +131,7 @@ static Tex9 *tex_new(Dev9 *d, int type, uint32_t w, uint32_t h, uint32_t dep, ui
     for (int f = 0; f < faces; f++) {
         uint32_t lw = w, lh = h;
         for (uint32_t l = 0; l < t->levels; l++) {
-            uint32_t root = l ? t->lv[f][0]->id : 0;
+            uint32_t root = l ? t->lv[f][0]->id : f ? t->lv[0][0]->id : 0;   /* cube faces share face 0's texture (one slice each) */
             t->lv[f][l] = surf_new(d, lw, lh, fmt, usage & (USAGE_RENDERTARGET | USAGE_DEPTHSTENCIL), pool, kind, t, l, (uint32_t)f, root, l ? 0 : t->levels);
             lw = lw > 1 ? lw / 2 : 1; lh = lh > 1 ? lh / 2 : 1;
         }
@@ -355,6 +356,8 @@ static void set_tex(Dev9 *d, uint32_t st, Tex9 *t)
     if (st >= 16) return;
     if (d->rec) { RecEnt e = {REC_TEX, st, 0}; e.p = t; if (t) t->ref++; rec_put(d->rec, e); return; }
     if (t) t->ref++;
+    { static int n = -1; if (n < 0) n = getenv("D3D9_TEXLOG") ? atoi(getenv("D3D9_TEXLOG")) : 0;
+      if (n > 0 && d->prog) { n--; fprintf(stderr, "d3d9: program %u: stage %u texture %08x (from %08x)\n", d->prog, st, t ? t->g : 0, (uint32_t)(uintptr_t)__builtin_return_address(0)); } }
     if (d->tex[st]) tex_release(d->tex[st]);
     d->tex[st] = t;
     if (st < 8) { uint32_t *p = cmd_begin(DSR_TEXTURE, 8); p[0] = st; p[1] = tex_id(t); cmd_end(); }
@@ -505,6 +508,155 @@ static void draw_indexed(Dev9 *d, uint32_t prim, int32_t base, uint32_t minidx, 
     }
     emit(d, prim, fvf, v, nv, ix, ni); free(ix);
 }
+
+/* ---- programmable draws: an effect pass's Metal program bound (d3dx9_fx.c) ----
+ * Every vertex element goes to an attribute slot by its semantic, as a float4 (hlsl.c reads them that way):
+ * 0 position, 1 normal, 2-3 colour 0-1, 4-11 texture coordinates 0-7, 12 tangent, 13 binormal, 14 blend weights,
+ * 15 blend indices. */
+static int sem_slot(int usage, int idx)
+{
+    switch (usage) {
+    case DU_POSITION: case DU_POSITIONT: return idx ? -1 : 0;
+    case DU_NORMAL: return idx ? -1 : 1;
+    case DU_COLOR: return idx < 2 ? 2 + idx : -1;
+    case DU_TEXCOORD: return idx < 8 ? 4 + idx : -1;
+    case DU_TANGENT: return idx ? -1 : 12;
+    case DU_BINORMAL: return idx ? -1 : 13;
+    case DU_BLENDWEIGHT: return idx ? -1 : 14;
+    case DU_BLENDINDICES: return idx ? -1 : 15;
+    }
+    return -1;
+}
+static float half_to_float(uint16_t h)
+{
+    uint32_t sg = (uint32_t)(h >> 15) << 31, e = (h >> 10) & 31, m = h & 1023, f;
+    if (!e) { if (!m) f = sg; else { float v = ldexpf((float)m, -24); return sg ? -v : v; } }
+    else if (e == 31) f = sg | 0x7f800000u | (m << 13);
+    else f = sg | ((e + 112) << 23) | (m << 13);
+    float r; memcpy(&r, &f, 4); return r;
+}
+static int elem_size(int type) { static const int s[] = {4, 8, 12, 16, 4, 4, 4, 8, 4, 4, 8, 4, 8, 4, 4, 4, 8}; return type < 17 ? s[type] : 0; }
+static void elem_f4(int type, const uint8_t *s, float *o)      /* D3DDECLTYPE -> float4, missing components 0, 0, 0, 1 */
+{
+    o[0] = o[1] = o[2] = 0; o[3] = 1; int16_t sh[4]; uint16_t us[4];
+    switch (type) {
+    case 0: case 1: case 2: case 3: memcpy(o, s, 4u * (uint32_t)(type + 1)); break;
+    case 4: o[0] = s[2] / 255.0f; o[1] = s[1] / 255.0f; o[2] = s[0] / 255.0f; o[3] = s[3] / 255.0f; break;   /* D3DCOLOR (BGRA) */
+    case 5: for (int k = 0; k < 4; k++) o[k] = s[k]; break;                                                   /* UBYTE4 */
+    case 6: memcpy(sh, s, 4); o[0] = sh[0]; o[1] = sh[1]; break;                                               /* SHORT2 */
+    case 7: memcpy(sh, s, 8); for (int k = 0; k < 4; k++) o[k] = sh[k]; break;                                /* SHORT4 */
+    case 8: for (int k = 0; k < 4; k++) o[k] = s[k] / 255.0f; break;                                          /* UBYTE4N */
+    case 9: memcpy(sh, s, 4); o[0] = sh[0] / 32767.0f; o[1] = sh[1] / 32767.0f; break;                         /* SHORT2N */
+    case 10: memcpy(sh, s, 8); for (int k = 0; k < 4; k++) o[k] = sh[k] / 32767.0f; break;                    /* SHORT4N */
+    case 11: memcpy(us, s, 4); o[0] = us[0] / 65535.0f; o[1] = us[1] / 65535.0f; break;                        /* USHORT2N */
+    case 12: memcpy(us, s, 8); for (int k = 0; k < 4; k++) o[k] = us[k] / 65535.0f; break;                    /* USHORT4N */
+    case 13: { uint32_t v; memcpy(&v, s, 4); o[0] = (float)(v & 1023); o[1] = (float)((v >> 10) & 1023); o[2] = (float)((v >> 20) & 1023); break; }   /* UDEC3 */
+    case 14: { int32_t v; memcpy(&v, s, 4); o[0] = (float)((v << 22) >> 22) / 511.0f; o[1] = (float)((v << 12) >> 22) / 511.0f; o[2] = (float)((v << 2) >> 22) / 511.0f; break; }   /* DEC3N */
+    case 15: memcpy(us, s, 4); o[0] = half_to_float(us[0]); o[1] = half_to_float(us[1]); break;               /* FLOAT16_2 */
+    case 16: memcpy(us, s, 8); for (int k = 0; k < 4; k++) o[k] = half_to_float(us[k]); break;               /* FLOAT16_4 */
+    }
+}
+typedef struct PElem { int stream, off, type, slot; } PElem;
+static int prog_layout(Dev9 *d, PElem *el, int *pretrans)      /* the bound declaration (or FVF) as attribute slots */
+{
+    int n = 0; *pretrans = 0;
+    if (d->decl) {
+        for (int k = 0; k < d->decl->n && n < 32; k++) {
+            DElem *e = &d->decl->e[k]; int sl = sem_slot(e->usage, e->uidx);
+            if (sl < 0 || e->type > 16) continue;
+            if (e->usage == DU_POSITIONT) *pretrans = 1;
+            el[n].stream = e->stream; el[n].off = e->off; el[n].type = e->type; el[n].slot = sl; n++;
+        }
+        return n;
+    }
+    uint32_t f = d->fvf, off = 0;
+    if ((f & 0xe) == 4) { el[n++] = (PElem){0, 0, 3, 0}; off = 16; *pretrans = 1; } else if (f & 2) { el[n++] = (PElem){0, 0, 2, 0}; off = 12; }
+    if (f & 0x10) { el[n++] = (PElem){0, (int)off, 2, 1}; off += 12; }
+    if (f & 0x20) off += 4;
+    if (f & 0x40) { el[n++] = (PElem){0, (int)off, 4, 2}; off += 4; }
+    if (f & 0x80) { el[n++] = (PElem){0, (int)off, 4, 3}; off += 4; }
+    for (uint32_t t = 0, nt = (f >> 8) & 0xf; t < nt && t < 8; t++) {
+        uint32_t c = (f >> (16 + 2 * t)) & 3, comps = c == 0 ? 2 : c == 1 ? 3 : c == 2 ? 4 : 1;
+        el[n++] = (PElem){0, (int)off, (int)comps - 1, 4 + (int)t}; off += 4 * comps;
+    }
+    return n;
+}
+static void prog_draw(Dev9 *d, uint32_t prim, uint32_t first, uint32_t nv, const uint16_t *idx, uint32_t ni, const uint8_t *up, uint32_t up_stride)
+{
+    PElem el[32]; int pretrans, n = prog_layout(d, el, &pretrans); uint32_t mask = 0;
+    for (int k = 0; k < n; k++) mask |= 1u << el[k].slot;
+    int ns = __builtin_popcount(mask); if (!ns || !nv) return;
+    { static int nlog; if (logon() && nlog++ < 6) fprintf(stderr, "d3d9: effect draw: program %u, prim %u, %u vertices, %u indices, attributes %04x%s%s\n", d->prog, prim, nv, ni, mask, pretrans ? " (pretransformed)" : "", d->decl ? " (declaration)" : ""); }
+    uint64_t bytes = (uint64_t)nv * (uint64_t)ns * 16 + (uint64_t)ni * 2;
+    if (bytes > (16u << 20)) { static int w; if (!w++) fprintf(stderr, "d3d9: an effect draw too large for the command ring (skipped)\n"); return; }
+    uint32_t ib = (ni * 2 + 3) & ~3u, vb = nv * (uint32_t)ns * 16, *p = cmd_begin(DSR_DRAW_PROG, 20 + vb + ib);
+    p[0] = prim; p[1] = mask; p[2] = nv; p[3] = ni; p[4] = (uint32_t)pretrans;
+    float *out = (float *)(p + 5);
+    for (int s = 0; s < ns * (int)nv; s++) { out[4 * s] = out[4 * s + 1] = out[4 * s + 2] = 0; out[4 * s + 3] = 1; }
+    int col[16]; for (int sl = 0, c = 0; sl < 16; sl++) col[sl] = (mask >> sl) & 1 ? c++ : -1;
+    for (int k = 0; k < n; k++) {
+        const uint8_t *src; uint32_t stride; int sz = elem_size(el[k].type);
+        if (up) { if (el[k].stream) continue; src = up; stride = up_stride; }
+        else {
+            Buf9 *b = d->vb[el[k].stream]; if (!b) continue;
+            stride = d->vb_stride[el[k].stream];
+            uint64_t start = (uint64_t)d->vb_off[el[k].stream] + (uint64_t)first * stride;
+            if (start + (uint64_t)(nv - 1) * stride + (uint64_t)el[k].off + (uint64_t)sz > b->len) { static int w; if (!w++) fprintf(stderr, "d3d9: an effect draw reads past its vertex buffer (skipped)\n"); cmd_end(); return; }
+            src = G_MEM + b->mem + start;
+        }
+        for (uint32_t v = 0; v < nv; v++) elem_f4(el[k].type, src + (size_t)v * stride + el[k].off, out + 4 * ((size_t)v * (size_t)ns + (size_t)col[el[k].slot]));
+    }
+    if (ni) memcpy((uint8_t *)(p + 5) + vb, idx, ni * 2);
+    cmd_end();
+    if (d->rt) d->rt->gpu_newer = 1;
+}
+static void prog_draw_indexed(Dev9 *d, uint32_t prim, int32_t base, uint32_t minidx, uint32_t nv, const uint8_t *ib, int idx32, uint32_t ni, const uint8_t *up, uint32_t up_stride)
+{
+    if (!nv || !ni || nv > 65536) return;
+    uint16_t *ix = malloc((size_t)ni * 2);
+    for (uint32_t k = 0; k < ni; k++) {
+        uint32_t i = idx32 ? ((const uint32_t *)ib)[k] : ((const uint16_t *)ib)[k];
+        i = i >= minidx ? i - minidx : 0; if (i >= nv) i = nv - 1;
+        ix[k] = (uint16_t)i;
+    }
+    prog_draw(d, prim, (uint32_t)(base + (int32_t)minidx), nv, ix, ni, up, up_stride); free(ix);
+}
+static uint32_t next_prog_id = 1;
+uint32_t d9_program_create(const char *msl, size_t len, uint32_t kinds)
+{
+    if (len > (4u << 20)) return 0;
+    uint32_t id = next_prog_id++, *p = cmd_begin(DSR_PROG_CREATE, 12 + (((uint32_t)len + 4) & ~3u));
+    p[0] = id; p[1] = kinds; p[2] = (uint32_t)len; memcpy(p + 3, msl, len); ((char *)(p + 3))[len] = 0; cmd_end();
+    return id;
+}
+void d9_program_use(Dev9 *d, uint32_t prog)
+{
+    if (d->prog == prog) return;
+    d->prog = prog; uint32_t *p = cmd_begin(DSR_PROG_USE, 4); p[0] = prog; cmd_end();
+}
+void d9_program_consts(Dev9 *d, const float *regs, int nregs)
+{
+    (void)d; if (nregs <= 0) return; if (nregs > 4096) nregs = 4096;
+    uint32_t *p = cmd_begin(DSR_PROG_CONST, 4 + 16 * (uint32_t)nregs); p[0] = (uint32_t)nregs; memcpy(p + 1, regs, 16 * (size_t)nregs); cmd_end();
+}
+typedef struct D9Saved { uint32_t rs[256], tss[8][33], ss[16][14]; Tex9 *tex[16]; uint32_t prog; } D9Saved;
+void *d9_state_save(Dev9 *d)
+{
+    D9Saved *s = malloc(sizeof *s); memcpy(s->rs, d->rs, sizeof s->rs); memcpy(s->tss, d->tss, sizeof s->tss); memcpy(s->ss, d->ss, sizeof s->ss);
+    for (int k = 0; k < 16; k++) { s->tex[k] = d->tex[k]; if (s->tex[k]) s->tex[k]->ref++; }
+    s->prog = d->prog; return s;
+}
+static void set_rs(Dev9 *d, uint32_t s, uint32_t v); static void set_tss(Dev9 *d, uint32_t st, uint32_t t, uint32_t v); static void set_ss(Dev9 *d, uint32_t sm, uint32_t t, uint32_t v); static void set_tex(Dev9 *d, uint32_t st, Tex9 *t);
+void d9_state_restore(Dev9 *d, void *saved)
+{
+    D9Saved *s = saved; if (!s) return;
+    for (uint32_t k = 0; k < 256; k++) if (d->rs[k] != s->rs[k]) set_rs(d, k, s->rs[k]);
+    for (uint32_t st = 0; st < 8; st++) for (uint32_t t = 0; t < 33; t++) if (d->tss[st][t] != s->tss[st][t]) set_tss(d, st, t, s->tss[st][t]);
+    for (uint32_t sm = 0; sm < 16; sm++) for (uint32_t t = 0; t < 14; t++) if (d->ss[sm][t] != s->ss[sm][t]) set_ss(d, sm, t, s->ss[sm][t]);
+    for (uint32_t k = 0; k < 16; k++) { if (d->tex[k] != s->tex[k]) set_tex(d, k, s->tex[k]); if (s->tex[k]) tex_release(s->tex[k]); }
+    d9_program_use(d, s->prog); free(s);
+}
+int d9_shaders_on(void) { static int on = -1; if (on < 0) { const char *e = getenv("DS2_SHADERS"); on = !(e && !strcmp(e, "0")); } return on; }
 
 /* ---- the device ---- */
 #define DEV_ME ME(Dev9, O9_DEV)
@@ -695,25 +847,27 @@ M(dv_GetSoftwareVertexProcessing, 1) RET(0, 1); END
 OK_M(dv_SetNPatchMode, 2)
 M(dv_GetNPatchMode, 1) FPUSH(0.0); RET(0, 1); END
 M(dv_DrawPrimitive, 4) DEV_ME                          /* (type, start vertex, primitives) */
+    if (me->prog) { prog_draw(me, ARG(1), ARG(2), prim_verts(ARG(1), ARG(3)), 0, 0, 0, 0); RET(D3D_OK, 4); }
     if (!can_draw(me)) RET(D3D_OK, 4);
     uint32_t nv = prim_verts(ARG(1), ARG(3)), fvf; const uint8_t *v = gather(me, ARG(2), nv, &fvf, 0, 0);
     if (v) emit(me, ARG(1), fvf, v, nv, 0, 0); RET(D3D_OK, 4);
 END
 M(dv_DrawIndexedPrimitive, 7) DEV_ME                   /* (type, base vertex, min index, vertices, start index, primitives) */
-    if (!can_draw(me) || !me->ib) RET(D3D_OK, 7);
+    if ((!me->prog && !can_draw(me)) || !me->ib) RET(D3D_OK, 7);
     uint32_t ni = prim_verts(ARG(1), ARG(6)), is = me->ib->fmt == 102 ? 4 : 2;
     if ((uint64_t)(ARG(5) + ni) * is > me->ib->len) { static int w; if (!w++) fprintf(stderr, "d3d9: indices past the index buffer (skipped)\n"); RET(D3D_OK, 7); }
-    draw_indexed(me, ARG(1), (int32_t)ARG(2), ARG(3), ARG(4), G_MEM + me->ib->mem + ARG(5) * is, is == 4, ni, 0, 0); RET(D3D_OK, 7);
+    (me->prog ? prog_draw_indexed : draw_indexed)(me, ARG(1), (int32_t)ARG(2), ARG(3), ARG(4), G_MEM + me->ib->mem + ARG(5) * is, is == 4, ni, 0, 0); RET(D3D_OK, 7);
 END
 M(dv_DrawPrimitiveUP, 5) DEV_ME                        /* (type, primitives, data, stride) */
+    if (me->prog) { prog_draw(me, ARG(1), 0, prim_verts(ARG(1), ARG(2)), 0, 0, G_MEM + ARG(3), ARG(4)); RET(D3D_OK, 5); }
     if (!can_draw(me)) RET(D3D_OK, 5);
     uint32_t nv = prim_verts(ARG(1), ARG(2)), fvf; const uint8_t *v = gather(me, 0, nv, &fvf, G_MEM + ARG(3), ARG(4));
     if (v) emit(me, ARG(1), fvf, v, nv, 0, 0); RET(D3D_OK, 5);
 END
 M(dv_DrawIndexedPrimitiveUP, 9) DEV_ME                 /* (type, min index, vertices, primitives, indices, index format, data, stride) */
-    if (!can_draw(me)) RET(D3D_OK, 9);
+    if (!me->prog && !can_draw(me)) RET(D3D_OK, 9);
     uint32_t ni = prim_verts(ARG(1), ARG(4)), stride = ARG(8);
-    draw_indexed(me, ARG(1), 0, ARG(2), ARG(3), G_MEM + ARG(5), ARG(6) == 102, ni, G_MEM + ARG(7) + ARG(2) * stride, stride); RET(D3D_OK, 9);
+    (me->prog ? prog_draw_indexed : draw_indexed)(me, ARG(1), 0, ARG(2), ARG(3), G_MEM + ARG(5), ARG(6) == 102, ni, G_MEM + ARG(7) + ARG(2) * stride, stride); RET(D3D_OK, 9);
 END
 TODO_M(dv_ProcessVertices, 7, D3DERR_INVALIDCALL)
 M(dv_CreateVertexDeclaration, 3) DEV_ME
@@ -747,7 +901,7 @@ M(dv_CreateVertexShader, 3) DEV_ME RET(create_shader(me, 0, ARG(1), ARG(2)), 3);
 M(dv_SetVertexShader, 2) DEV_ME
     Shader9 *s = ARG(1) ? obj(ARG(1), O9_VS) : 0;
     if (me->rec) { RecEnt e = {REC_VS, 0, 0}; e.p = s; rec_put(me->rec, e); RET(D3D_OK, 2); }
-    me->vs = s; RET(D3D_OK, 2);
+    me->vs = s; d9_program_use(me, 0); RET(D3D_OK, 2);   /* the game's own shader (or none) replaces an effect's */
 END
 M(dv_GetVertexShader, 2) DEV_ME rt_w32(G_MEM, ARG(1), me->vs ? me->vs->g : 0); if (me->vs) me->vs->ref++; RET(D3D_OK, 2); END
 static uint32_t set_consts(float (*dst)[4], uint32_t max, uint32_t start, uint32_t data, uint32_t n, int get)
@@ -784,7 +938,7 @@ M(dv_CreatePixelShader, 3) DEV_ME RET(create_shader(me, 1, ARG(1), ARG(2)), 3); 
 M(dv_SetPixelShader, 2) DEV_ME
     Shader9 *s = ARG(1) ? obj(ARG(1), O9_PS) : 0;
     if (me->rec) { RecEnt e = {REC_PS, 0, 0}; e.p = s; rec_put(me->rec, e); RET(D3D_OK, 2); }
-    me->ps = s; RET(D3D_OK, 2);
+    me->ps = s; d9_program_use(me, 0); RET(D3D_OK, 2);
 END
 M(dv_GetPixelShader, 2) DEV_ME rt_w32(G_MEM, ARG(1), me->ps ? me->ps->g : 0); if (me->ps) me->ps->ref++; RET(D3D_OK, 2); END
 M(dv_SetPixelShaderConstantF, 4) DEV_ME RET(set_consts(me->psc, 224, ARG(1), ARG(2), ARG(3), 0), 4); END
@@ -888,7 +1042,9 @@ M(d9_Release, 1) ME(D3D9, O9_D3D) RET((uint32_t)(me->ref > 0 ? --me->ref : 0), 1
 OK_M(d9_RegisterSoftwareDevice, 2)
 M(d9_GetAdapterCount, 1) RET(1, 1); END
 static uint32_t gpu_vendor(void) { const char *e = getenv("DS2_GPU"); return e ? (uint32_t)strtoul(e, 0, 16) : 0x1002; }
-static uint32_t gpu_device(void) { const char *e = getenv("DS2_GPU"); const char *c2 = e ? strchr(e, ':') : 0; return c2 ? (uint32_t)strtoul(c2 + 1, 0, 16) : 0x514c; }
+/* the card the game is told about: a Radeon X800 (shader model 2.0; the game's "advanced" effects on by default) while
+ * effects run (d3dx9_fx.c), else a Radeon 8500 (fixed function); DS2_GPU=vendor:device overrides */
+static uint32_t gpu_device(void) { const char *e = getenv("DS2_GPU"); const char *c2 = e ? strchr(e, ':') : 0; return c2 ? (uint32_t)strtoul(c2 + 1, 0, 16) : d9_shaders_on() ? 0x4a49 : 0x514c; }
 M(d9_GetAdapterIdentifier, 4)                          /* D3DADAPTER_IDENTIFIER9: the reported card decides the game's defaults (system_detail.gas) */
     uint32_t o = ARG(3); memset(GP(o), 0, 1100);
     strcpy((char *)GP(o), "ati2dvag.dll"); strcpy((char *)GP(o + 512), "Apple Silicon (Metal)"); strcpy((char *)GP(o + 1024), "\\\\.\\DISPLAY1");
@@ -922,7 +1078,7 @@ END
 M(d9_CheckDeviceMultiSampleType, 7) if (ARG(6)) rt_w32(G_MEM, ARG(6), 1); RET(ARG(5) ? D3DERR_NOTAVAILABLE : D3D_OK, 7); END
 M(d9_CheckDepthStencilMatch, 6) RET(d9_fmt_depth(ARG(5)) ? D3D_OK : D3DERR_NOTAVAILABLE, 6); END
 M(d9_CheckDeviceFormatConversion, 5) RET(D3D_OK, 5); END
-static void fill_caps(uint32_t out)                    /* D3DCAPS9 of a Radeon 8500-class card (fixed-function, shader model 1.x) */
+static void fill_caps(uint32_t out)                    /* D3DCAPS9: a Radeon 8500-class card (shader model 1.x), or X800-class with effects */
 {
     uint32_t v[76] = {0};
     v[0] = 1; v[2] = 0x20000; v[3] = 0x20000000u | 0x40000000u | 0x20000; v[4] = 0x20 | 0x80; v[5] = 0x80000000u | 1;
@@ -939,6 +1095,12 @@ static void fill_caps(uint32_t out)                    /* D3DCAPS9 of a Radeon 8
     v[40] = 8; v[41] = 6; v[42] = 4; v[43] = 0; memcpy(&v[44], &(float){256.0f}, 4); v[45] = 0xfffff; v[46] = 0xfffff; v[47] = 16; v[48] = 255;
     v[49] = 0xfffe0101u; v[50] = 256; v[51] = 0xffff0104u; memcpy(&v[52], &(float){8.0f}, 4);
     v[53] = 0x1 | 0x8 | 0x20 | 0x40; v[56] = 0; v[57] = 0; v[58] = 1; v[59] = 0x1 | 0x2; v[60] = 1; v[61] = 0x200 | 0x2000000;
+    if (d9_shaders_on()) {                                 /* shader model 2.0, every declaration type */
+        v[49] = 0xfffe0200u; v[51] = 0xffff0200u; v[59] = 0x3ff;
+        v[62] = 0; v[63] = 0; v[64] = 12; v[65] = 1;           /* VS20Caps */
+        v[66] = 0; v[67] = 0; v[68] = 12; v[69] = 0; v[70] = 96;  /* PS20Caps */
+        v[72] = 65535; v[73] = 96;
+    }
     memcpy(GP(out), v, 304);
 }
 M(d9_GetDeviceCaps, 4) fill_caps(ARG(3)); RET(D3D_OK, 4); END
@@ -1028,3 +1190,10 @@ Tex9 *d9_any_tex(uint32_t g) { return any_tex(g); }
 uint32_t d9_surf_lock(Surf9 *s, uint32_t locked, uint32_t rect, uint32_t flags) { return surf_lock(s, locked, rect, flags); }
 uint32_t d9_surf_unlock(Surf9 *s) { return surf_unlock(s); }
 void d9_surf_upload(Surf9 *s, uint32_t y0, uint32_t y1) { surf_upload(s, y0, y1); }
+void d9_set_rs(Dev9 *d, uint32_t s, uint32_t v) { set_rs(d, s, v); }
+void d9_set_tss(Dev9 *d, uint32_t stage, uint32_t t, uint32_t v) { set_tss(d, stage, t, v); }
+void d9_set_ss(Dev9 *d, uint32_t sampler, uint32_t t, uint32_t v) { set_ss(d, sampler, t, v); }
+void d9_tex_addref(uint32_t g) { Tex9 *t = g ? any_tex(g) : NULL; if (t) t->ref++; }
+void d9_tex_release(uint32_t g) { Tex9 *t = g ? any_tex(g) : NULL; if (t) tex_release(t); }
+void d9_set_texture(Dev9 *d, uint32_t stage, uint32_t tex_iface) { if (stage < 16) set_tex(d, stage, tex_iface ? any_tex(tex_iface) : NULL); }
+uint32_t d9_texture_at(Dev9 *d, uint32_t stage) { return stage < 16 && d->tex[stage] ? d->tex[stage]->g : 0; }
