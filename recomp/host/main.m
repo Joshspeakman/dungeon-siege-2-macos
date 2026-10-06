@@ -88,6 +88,11 @@ static void *render_thread(void *arg)
                         if (shot_at == -2) { const char *e = test_mode ? getenv("DS_SHOT") : 0; shot_at = -1;   /* test mode only: it writes anywhere */ if (e) { const char *cm = strrchr(e, ','); if (cm) { snprintf(shot_path, sizeof shot_path, "%.*s", (int)(cm - e), e); shot_at = atol(cm + 1); } } }
                         const char *sp = test_mode ? script_tick(fno) : 0;
                         if (sp) { snprintf(shot_path, sizeof shot_path, "%s", sp); shot_at = fno; }
+                        {   /* DSR_FLASHLOG with DSR_FLASHDIR: a frame the renderer flagged (white, flash): the next one saved */
+                            extern volatile int dsr_flash_frame; static int seen; const char *dir = getenv("DSR_FLASHDIR");
+                            if (test_mode && dir && dsr_flash_frame != seen && shot_at < (long)fno) { seen = dsr_flash_frame;
+                                snprintf(shot_path, sizeof shot_path, "%s/flash-%d.png", dir, seen); shot_at = fno; }
+                        }
                         if ((long)fno == shot_at) {
                             id<MTLTexture> tex = dsr_renderer_presented(r); dsr_renderer_flush(r, 1);
                             if (tex && tex.pixelFormat == MTLPixelFormatBGRA8Unorm) {
