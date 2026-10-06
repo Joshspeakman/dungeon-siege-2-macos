@@ -145,6 +145,14 @@ class Lifter:
                     if r.mnemonic == 'cmp' and r.operands[1].type == X.X86_OP_IMM: m = (r.operands[1].imm & 0xffffffff) + 1; break
                 if m and m < 4096: n = max(self.pe.bytes_at(bt, m)) + 1
                 break
+            if q.mnemonic == 'mov' and q.operands[0].type == X.X86_OP_REG and q.reg_name(q.operands[0].reg) == idx \
+                    and q.operands[1].type == X.X86_OP_MEM:
+                # idx loaded from a local the switch bounded first: "cmp dword [ebp-x], N / ja / mov idx, [ebp-x]"
+                src = q.op_str.split(',', 1)[1].strip()
+                for r in reversed(p[:p.index(q)]):
+                    if r.mnemonic == 'cmp' and r.operands[1].type == X.X86_OP_IMM and r.op_str.split(',', 1)[0].strip() == src:
+                        n = (r.operands[1].imm & 0xffffffff) + 1; break
+                break
             if q.operands and q.operands[0].type == X.X86_OP_REG and q.reg_name(q.operands[0].reg) == idx and q.mnemonic not in ('cmp', 'test'):
                 break                                   # the index was computed some other way: no usable bound
         def ok(v): return v is not None and self.TLO <= v < self.THI and abs(v - i.address) <= 0x2000

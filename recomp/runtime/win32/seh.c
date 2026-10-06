@@ -17,6 +17,7 @@ int w32_protect_memory;
 extern uint32_t w32_unhandled_filter(void);
 
 enum { EXCEPTION_ACCESS_VIOLATION = 0xC0000005u, EH_UNWINDING = 2 };
+int vm_page_state(uint32_t);
 static const char *where(uint32_t code) { return code == EXCEPTION_ACCESS_VIOLATION ? "access violation" : "exception"; }
 
 /* Build EXCEPTION_RECORD (80 bytes) + CONTEXT (716 bytes) on the exception stack; returns the EXCEPTION_POINTERS address */
@@ -41,6 +42,15 @@ static uint32_t ensure_exc_stack(void)
     if (!exc_stack) exc_stack = vm_alloc(0, 0x40000, 0x3000, 4);
     return exc_stack + 0x40000 - 64 - (uint32_t)exc_depth * 0x9000;   /* nested exceptions get their own slice */
 }
+/* A Visual C++ C++-exception frame handler: "mov eax, FuncInfo; jmp __CxxFrameHandler" with a FuncInfo magic number */
+static int cxx_frame_handler(uint32_t h)
+{
+    if (h < 0x1000 || G_MEM[h] != 0xb8 || G_MEM[h + 5] != 0xe9) return 0;
+    uint32_t fi = rt_r32(G_MEM, h + 1);
+    if (fi < 0x1000 || vm_page_state(fi) != 2) return 0;
+    uint32_t magic = rt_r32(G_MEM, fi);
+    return magic >= 0x19930520u && magic <= 0x19930522u;
+}
 /* Returns 1 if execution may continue (a handler returned ExceptionContinueExecution or the top-level filter
  * returned EXCEPTION_CONTINUE_EXECUTION). */
 int w32_dispatch(Ctx *c, uint32_t code, uint32_t flags, uint32_t addr, int n, const uint32_t *info)
@@ -49,11 +59,24 @@ int w32_dispatch(Ctx *c, uint32_t code, uint32_t flags, uint32_t addr, int n, co
     uint32_t sp = ensure_exc_stack(); exc_depth++;
     static int seh_log = -1; if (seh_log < 0) seh_log = getenv("W32_SEHLOG") != 0;
     if (seh_log) fprintf(stderr, "recomp: dispatch %08x at %08x info %08x %08x (thread %x, depth %d)\n", code, addr, n > 0 ? info[0] : 0, n > 1 ? info[1] : 0, w32_tid(c), exc_depth);
+    if (seh_log) {                                                              /* the chain, with each frame's state word */
+        int k = 0;
+        for (uint32_t f = rt_r32(G_MEM, c->fs_base); f && f != 0xffffffffu && k < 12; f = rt_r32(G_MEM, f), k++)
+            fprintf(stderr, "recomp:   chain %08x handler %08x state %08x%s\n", f, rt_r32(G_MEM, f + 4), rt_r32(G_MEM, f + 8), f < c->esp ? " (below esp)" : "");
+        fprintf(stderr, "recomp:   esp %08x ebp %08x\n", c->esp, c->ebp);
+    }
     uint32_t rec, cx, ptrs = build(c, sp, code, flags, addr, n, info, &rec, &cx);
     Ctx h = *c; h.esp = rec - 0x40;                                             /* handlers run below the records */
     int ok = 0;
+    /* First touch of a reserved page (an archive view the game fills from its exception filter): C++ catch(...) frames
+     * are passed over, as if built with /EHs semantics. Dungeon Siege II reads archive views inside catch(...) {
+     * cleanup; throw; } blocks, which (with Visual C++ 7.1, where catch(...) also catches access violations) would
+     * otherwise turn the page fill into a rethrown exception. */
+    extern int vm_page_state(uint32_t);
+    int skip_cxx = code == EXCEPTION_ACCESS_VIOLATION && n > 1 && vm_page_state(info[1]) == 1;
     for (uint32_t frame = rt_r32(G_MEM, c->fs_base); frame && frame != 0xffffffffu; frame = rt_r32(G_MEM, frame)) {
         uint32_t handler = rt_r32(G_MEM, frame + 4), a[4] = {rec, frame, cx, 0};
+        if (skip_cxx && cxx_frame_handler(handler)) { if (seh_log) fprintf(stderr, "recomp:   frame %08x handler %08x: C++ frame passed over\n", frame, handler); continue; }
         h.esp = rec - 0x40;
         uint32_t r = w32_callback(&h, handler, 4, a);
         if (seh_log) fprintf(stderr, "recomp:   frame %08x handler %08x -> %u\n", frame, handler, r);

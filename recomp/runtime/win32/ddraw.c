@@ -5,6 +5,7 @@
  * read and written at its 32-bit Windows offsets in guest memory; lockable memory (surfaces, vertex buffers) lives in
  * guest memory because the game writes through the pointers Lock returns. */
 #include "w32.h"
+#include "dsr_producer.h"
 #include <stdarg.h>
 #include <mach/mach_time.h>
 #include <unistd.h>
@@ -86,9 +87,9 @@ enum { O_DD = 1, O_D3D, O_SURF, O_GAMMA, O_DEV, O_VB };
 typedef struct { int type; void *p; } Obj;
 static Obj objs[65536]; static uint32_t nobjs = 1;
 static pthread_mutex_t obj_lock = PTHREAD_MUTEX_INITIALIZER;
-static uint32_t vt[8];                          /* guest vtable per interface type */
+uint32_t vt[64];                                /* guest vtable per interface type (d3d9.c uses types from 16) */
 static uint32_t free_slot[65536], nfree_slot;   /* released slots, reused only once all have been handed out */
-static uint32_t make_iface(int type, void *p)
+uint32_t make_iface(int type, void *p)
 {
     pthread_mutex_lock(&obj_lock);
     /* new ids while there are any (stale pointers stay detectable), then the released ones: a long session must not
@@ -100,13 +101,13 @@ static uint32_t make_iface(int type, void *p)
     rt_w32(G_MEM, g, vt[type]); rt_w32(G_MEM, g + 4, k);
     return g;
 }
-static void *obj(uint32_t g, int type)
+void *obj(uint32_t g, int type)
 {
     if (!g) return 0;
     uint32_t k = rt_r32(G_MEM, g + 4);
     return (k < 65536 && objs[k].type == type) ? objs[k].p : 0;
 }
-static void obj_drop(uint32_t g)                 /* an interface's object is gone */
+void obj_drop(uint32_t g)                        /* an interface's object is gone */
 {
     uint32_t k = g ? rt_r32(G_MEM, g + 4) : 0;
     pthread_mutex_lock(&obj_lock);
@@ -117,16 +118,16 @@ static void obj_drop(uint32_t g)                 /* an interface's object is gon
 
 static uint32_t obj_ids, free_sid[65536], nfree_sid;      /* the renderer's surface ids: new ones, then released ones */
 static pthread_mutex_t sid_lock = PTHREAD_MUTEX_INITIALIZER;
-static uint32_t next_object_id(void)
+uint32_t next_object_id(void)
 {
     pthread_mutex_lock(&sid_lock); uint32_t id = obj_ids < 65535 ? ++obj_ids : nfree_sid ? free_sid[--nfree_sid] : 0; pthread_mutex_unlock(&sid_lock);
     return id;                                  /* 0 (all in use): the renderer ignores the surface */
 }
-static void surface_id_free(uint32_t id)        /* after its DSR_SURFACE_DESTROY, so a reuse comes later in the stream */
+void surface_id_free(uint32_t id)               /* after its DSR_SURFACE_DESTROY, so a reuse comes later in the stream */
 {
     pthread_mutex_lock(&sid_lock); if (id && id < 65536 && nfree_sid < 65536) free_sid[nfree_sid++] = id; pthread_mutex_unlock(&sid_lock);
 }
-static uint32_t fvf_stride(uint32_t fvf)
+uint32_t fvf_stride(uint32_t fvf)
 {
     uint32_t s = 0, n;
     switch (fvf & 0xe) { case 2: s = 12; break; case 4: s = 16; break; case 6: s = 16; break; case 8: s = 20; break;
@@ -150,7 +151,7 @@ void dsr_attach_consumer(DsrShmHeader *h) { shm = h; shm_ring = (uint8_t *)h + D
 static int ring_space(uint32_t n) { return DSR_RING_SIZE - (wpos - __atomic_load_n(&shm->read_pos, __ATOMIC_ACQUIRE)) >= n; }
 static void wait_space(uint32_t n) { while (!ring_space(n)) usleep(100); }
 static int cmd_drop; static uint8_t *drop_buf; static size_t drop_cap;
-static uint32_t *cmd_begin(uint32_t op, uint32_t payload)
+uint32_t *cmd_begin(uint32_t op, uint32_t payload)
 {
     pthread_mutex_lock(&cmd_lock);
     if (payload > DSR_RING_SIZE / 2) {          /* larger than the ring takes: written aside and dropped (a wait would never end) */
@@ -177,7 +178,7 @@ static uint32_t *cmd_begin(uint32_t op, uint32_t payload)
     return h + 2;
 }
 static uint32_t st_ops[32];                         /* DSR_STATS=1: per-second counts of each record type */
-static void cmd_end(void)
+void cmd_end(void)
 {
     if (cmd_drop) { cmd_drop = 0; pthread_mutex_unlock(&cmd_lock); return; }
     uint32_t op = *(uint32_t *)cur;
@@ -242,7 +243,7 @@ static void cmd_frame(void)
     while (frames - __atomic_load_n(&shm->frames_done, __ATOMIC_ACQUIRE) > 2 && now_us() - t0 < 250000) usleep(50);
 }
 static uint32_t rb_cookie; static pthread_mutex_t rb_lock = PTHREAD_MUTEX_INITIALIZER;
-static int cmd_readback(uint32_t id, const int32_t *r, uint8_t *dst, uint32_t pitch, uint32_t bpp)
+int cmd_readback(uint32_t id, const int32_t *r, uint8_t *dst, uint32_t pitch, uint32_t bpp)
 {
     uint32_t w = (uint32_t)(r[2] - r[0]), h = (uint32_t)(r[3] - r[1]), row = w * bpp; int ok = 0;
     if (!shm || !w || !h || row * h > DSR_READBACK_SIZE) return 0;
@@ -447,14 +448,15 @@ static void crash_test(Ctx *c)
     if (!strcmp(kind, "abort")) abort();
     if (!strcmp(kind, "hostcrash")) { volatile int *p = (int *)(uintptr_t)8; *p = 1; }
 }
-static void present(Ctx *c, DSurface *s)
+void dsr_present(Ctx *c, uint32_t id)           /* a finished frame: pacing, then the present record (also for d3d9.c) */
 {
     { void w32_crash_heartbeat(int); w32_crash_heartbeat(0); crash_test(c); }
     cmd_cap_wait();
     uint64_t q = w32_deterministic ? 0 : now_us();
-    uint32_t *p = cmd_begin(DSR_PRESENT, 16); p[0] = s->id; p[1] = (uint32_t)q; p[2] = (uint32_t)(q >> 32); p[3] = 1000000; cmd_end();
+    uint32_t *p = cmd_begin(DSR_PRESENT, 16); p[0] = id; p[1] = (uint32_t)q; p[2] = (uint32_t)(q >> 32); p[3] = 1000000; cmd_end();
     cmd_frame();
 }
+static void present(Ctx *c, DSurface *s) { dsr_present(c, s->id); }
 M(s_Flip, 3) ME(DSurface, O_SURF)
     DSurface *t = obj(ARG(1), O_SURF), *back = t ? t : (me->nattached ? me->attached[0] : me);
     present(c, back);
@@ -923,7 +925,12 @@ static void init_vtables(void)
 
 /* for the host backend: the current display mode (the game's coordinate space) */
 static DDraw *the_dd;
-void dsr_mode_size(uint32_t *w, uint32_t *h) { *w = the_dd ? the_dd->mode_w : (uint32_t)w32_screen_w; *h = the_dd ? the_dd->mode_h : (uint32_t)w32_screen_h; }
+uint32_t dsr_d3d9_w, dsr_d3d9_h;               /* set by d3d9.c: its back buffer is the game's coordinate space */
+void dsr_mode_size(uint32_t *w, uint32_t *h)
+{
+    if (dsr_d3d9_w) { *w = dsr_d3d9_w; *h = dsr_d3d9_h; return; }
+    *w = the_dd ? the_dd->mode_w : (uint32_t)w32_screen_w; *h = the_dd ? the_dd->mode_h : (uint32_t)w32_screen_h;
+}
 
 /* ---- exports ---- */
 IMPL(ddraw, DirectDrawCreateEx)
