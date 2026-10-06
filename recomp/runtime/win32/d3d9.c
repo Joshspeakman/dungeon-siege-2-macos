@@ -329,15 +329,26 @@ M(sb_Capture, 1) ME(SB9, O9_SB) sb_capture(me->dev, me); RET(D3D_OK, 1); END
 M(sb_Apply, 1) ME(SB9, O9_SB) sb_apply(me->dev, me); RET(D3D_OK, 1); END
 
 /* ---- device state: each setter records (state block) or applies and sends ---- */
+static void state_seen(int kind, uint32_t a, uint32_t b, uint32_t v)   /* D3D9_STATELOG: each (state, value) the game uses, once */
+{
+    static int on = -1; if (on < 0) on = getenv("D3D9_STATELOG") != 0;
+    if (!on) return;
+    static uint64_t seen[4096]; static int n; uint64_t k = (uint64_t)kind << 60 | (uint64_t)a << 48 | (uint64_t)b << 40 | v;
+    for (int i = 0; i < n; i++) if (seen[i] == k) return;
+    if (n < 4096) seen[n++] = k;
+    fprintf(stderr, "d3d9: state %s %u %u = %u (%08x)\n", kind == 0 ? "rs" : kind == 1 ? "tss" : "ss", a, b, v, v);
+}
 static void set_rs(Dev9 *d, uint32_t s, uint32_t v)
 {
     if (s >= 256) return;
+    state_seen(0, s, 0, v);
     if (d->rec) { RecEnt e = {REC_RS, s, v}; rec_put(d->rec, e); return; }
     d->rs[s] = v; uint32_t *p = cmd_begin(DSR_RENDER_STATE, 8); p[0] = s; p[1] = v; cmd_end();
 }
 static void set_tss(Dev9 *d, uint32_t st, uint32_t t, uint32_t v)
 {
     if (st >= 8 || t >= 33) return;
+    state_seen(1, st, t, v);
     if (d->rec) { RecEnt e = {REC_TSS, st << 8 | t, v}; rec_put(d->rec, e); return; }
     d->tss[st][t] = v;
     if (t < 32) { uint32_t *p = cmd_begin(DSR_TSS, 12); p[0] = st; p[1] = t; p[2] = v; cmd_end(); }
