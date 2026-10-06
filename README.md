@@ -24,7 +24,8 @@ git clone <this repository> && cd dungeon-siege-2-macos
 ```
 
 This recompiles the game (a few minutes) and installs **Dungeon Siege II Native** in `~/Applications`. Settings, saves
-and logs live in `~/Games/DungeonSiege2Native`. The launch window picks the resolution, view distance and frame rate, takes a CD key for online play, and offers
+and logs live in `~/Games/DungeonSiege2Native`. The game runs in macOS full screen with **Game Mode** on; on a Mac with a notch the launch window's Notch row puts the
+picture below it or around it. The launch window picks the resolution, view distance and frame rate, takes a CD key for online play, and offers
 updates: it rebuilds the app from the newest version of this repository and your own copy of the game.
 
 **Test Lab** (the launch window's middle button): the game in a window beside a panel that travels anywhere in the

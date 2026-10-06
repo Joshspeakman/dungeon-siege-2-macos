@@ -275,10 +275,19 @@ static void draw_text(NSString *s, NSFont *f, NSColor *c, NSRect r, NSTextAlignm
 @end
 
 // ---------------------------------------------------------------- choices, settings file, the window
-static NSArray<NSDictionary *> *resolution_choices(void)
+/* A display with a notch: the game in macOS full screen (with Game Mode either way) below it, with a black band beside
+ * the camera, or over the whole display around it, the notch covering a little of the picture's top centre (DS_NOTCH) */
+static int notch_height(void) { if (@available(macOS 12.0, *)) return (int)NSScreen.mainScreen.safeAreaInsets.top; return 0; }
+static NSArray<NSDictionary *> *notch_choices(void)
+{
+    return @[@{@"value": @"hide", @"label": @"Hide the Notch", @"note": @"The picture below the camera, a black band beside it"},
+             @{@"value": @"around", @"label": @"Around the Notch", @"note": @"The picture on the whole display, the notch over its top"}];
+}
+static void apply_notch(NSString *v) { setenv("DS_NOTCH", v.UTF8String, 1); }
+static NSArray<NSDictionary *> *resolution_choices(BOOL below_notch)
 {
     NSScreen *s = NSScreen.mainScreen; int W = (int)s.frame.size.width, H = (int)s.frame.size.height; double sc = s.backingScaleFactor;
-    if (@available(macOS 12.0, *)) H -= (int)s.safeAreaInsets.top;   /* full screen sits below a notch */
+    if (below_notch) H -= notch_height();
     NSMutableArray *a = [NSMutableArray array]; NSMutableSet *seen = [NSMutableSet set];
     void (^add)(int, int, NSString *) = ^(int w, int h, NSString *note) {
         NSString *v = [NSString stringWithFormat:@"%dx%d", w, h]; if ([seen containsObject:v]) return; [seen addObject:v];
@@ -492,12 +501,14 @@ int ds_launcher_run(const char *game_dir, const char *data_dir)
     NSString *data = @(data_dir), *plistPath = [data stringByAppendingPathComponent:@"launcher.plist"];
     NSDictionary *saved = [NSDictionary dictionaryWithContentsOfFile:plistPath] ?: @{};
     DSRow *res = [DSRow new], *dist = [DSRow new], *fps = [DSRow new];
-    res.title = @"Resolution"; res.choices = resolution_choices(); res.index = index_of(res.choices, saved[@"resolution"], 0);
+    DSRow *notch = [DSRow new]; notch.title = @"Notch"; notch.choices = notch_choices(); notch.index = index_of(notch.choices, saved[@"notch"], 0);
+    BOOL (^below)(void) = ^BOOL { return ![notch.choices[notch.index][@"value"] isEqualToString:@"around"]; };
+    res.title = @"Resolution"; res.choices = resolution_choices(below()); res.index = index_of(res.choices, saved[@"resolution"], 0);
     dist.title = @"View Distance"; dist.choices = distance_choices(); dist.index = index_of(dist.choices, saved[@"viewDistance"], 0);
     fps.title = @"Frame Rate"; fps.choices = framerate_choices(); fps.index = index_of(fps.choices, saved[@"frameRate"], 0);
     const char *shot = getenv("DS_LAUNCHER_SHOT");
     if (getenv("DS_NO_LAUNCHER") && !shot) {
-        if (saved.count) apply(res.choices[res.index][@"value"], dist.choices[dist.index][@"value"], fps.choices[fps.index][@"value"]);
+        if (saved.count) { apply(res.choices[res.index][@"value"], dist.choices[dist.index][@"value"], fps.choices[fps.index][@"value"]); apply_notch(notch.choices[notch.index][@"value"]); }
         return 1;
     }
 
@@ -511,9 +522,15 @@ int ds_launcher_run(const char *game_dir, const char *data_dir)
     DSRow *online = [DSRow new]; online.title = @"Online"; online.choices = cdkey_choice(data);
     __weak DSRow *wo = online;
     online.activate = ^{ if (cdkey_panel(data)) wo.choices = cdkey_choice(data); };
-    NSArray<DSRow *> *rows = @[res, dist, fps, online, upd];
+    NSArray<DSRow *> *rows = notch_height() > 0 ? @[res, notch, dist, fps, online, upd] : @[res, dist, fps, online, upd];
     DSLaunchView *v = [[DSLaunchView alloc] initWithFrame:NSMakeRect(0, 0, 780, 700 + 74 * (NSInteger)(rows.count - 5))];
     v.rows = rows; v.hover = v.pressed = HIT_NONE;
+    __block BOOL wasBelow = below();
+    v.onChange = ^{                                                 /* the Notch row: "This display" changes size */
+        if (below() == wasBelow) return;
+        NSString *cur = res.choices[res.index][@"value"]; wasBelow = below();
+        res.choices = resolution_choices(wasBelow); res.index = index_of(res.choices, cur, 0);
+    };
     __weak DSLaunchView *wv = v; __weak DSRow *wu = upd;
     void (^check)(void) = ^{
         if (!updater) return;
@@ -594,7 +611,8 @@ int ds_launcher_run(const char *game_dir, const char *data_dir)
     if (!result) return 0;
     NSString *rv = res.choices[res.index][@"value"], *fv = fps.choices[fps.index][@"value"];
     NSString *dv = dist.choices[dist.index][@"value"];
-    [@{@"resolution": rv, @"viewDistance": dv, @"frameRate": fv} writeToFile:plistPath atomically:YES];
-    apply(rv, dv, fv);
+    NSString *nv = notch.choices[notch.index][@"value"];
+    [@{@"resolution": rv, @"viewDistance": dv, @"frameRate": fv, @"notch": nv} writeToFile:plistPath atomically:YES];
+    apply(rv, dv, fv); apply_notch(nv);
     return result;
 }
