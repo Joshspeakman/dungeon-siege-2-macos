@@ -108,6 +108,10 @@ static void on_fault(int sig, siginfo_t *si, void *uc)
             #define LIFTED(d) ((d).dli_sname && (!strncmp((d).dli_sname, "f_", 2) || !strncmp((d).dli_sname, "b_", 2)))
             int ours = dladdr(pc, &di) && LIFTED(di);
             if (!ours && dladdr(lr, &dl) && LIFTED(dl)) ours = 1;              /* memmove/memset called by recompiled code (rep movs/stos) */
+            /* a Windows function the runtime implements reading a game buffer that lies in a reserved archive view
+             * (D3DX loading a texture straight from the archive): on Windows that fault reaches the game's exception
+             * filter too, which fills the page */
+            if (!ours && vm_page_state(ga) == 1) ours = 1;
             if (!ours) {
                 fprintf(stderr, "recomp: runtime fault: %s of guest %08x in %s (thread %x)\n", write ? "write" : "read", ga,
                         di.dli_sname ? di.dli_sname : "?", w32_tid(c));

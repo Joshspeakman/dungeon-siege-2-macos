@@ -149,17 +149,14 @@ static void parse_script(void)
 /* The game moves its own cursor by the distance of the OS cursor from the window centre each frame (then re-centres
  * it), so a scripted click is mouse motion: pin to the top-left corner, then move by the target offset in steps. */
 static int mot_dx, mot_dy, mot_home;
+/* Dungeon Siege II reads the cursor's absolute position (GetCursorPos): a scripted move puts it at the target and sends
+ * WM_MOUSEMOVE there for a few frames */
 static void motion_tick(void)
 {
-    uint32_t mw, mh; dsr_mode_size(&mw, &mh); int cx = (int)mw / 2, cy = (int)mh / 2, dx, dy;
-    if (mot_home > 0) { mot_home--; dx = -cx; dy = -cy; }
-    else if (mot_dx || mot_dy) {
-        dx = mot_dx > cx - 1 ? cx - 1 : mot_dx < -(cx - 1) ? -(cx - 1) : mot_dx;
-        dy = mot_dy > cy - 1 ? cy - 1 : mot_dy < -(cy - 1) ? -(cy - 1) : mot_dy;
-        mot_dx -= dx; mot_dy -= dy;
-    } else return;
-    vcur_x = cx + dx; vcur_y = cy + dy; w32_set_cursor((int)vcur_x, (int)vcur_y);
-    post(0x200, 0, ((uint32_t)(int)vcur_y << 16) | ((uint32_t)(int)vcur_x & 0xffff));
+    if (mot_home <= 0) return;
+    mot_home--;
+    vcur_x = mot_dx; vcur_y = mot_dy; w32_set_cursor(mot_dx, mot_dy);
+    post(0x200, 0, ((uint32_t)mot_dy << 16) | ((uint32_t)mot_dx & 0xffff));
 }
 /* "type" action: each character as a keyDown/keyUp NSEvent sent to the window; {esc} {enter} {bs} for keys */
 static void type_text(NSString *text);
@@ -197,11 +194,11 @@ static const char *script_tick(uint32_t fno)       /* returns a screenshot path 
         if (!strcmp(a->kind, "click") || !strcmp(a->kind, "rclick")) {
             int r = a->kind[0] == 'r';
             if (fno == a->frame) { mot_home = 8; mot_dx = a->x; mot_dy = a->y; }
-            if (fno == a->frame + 20) post(r ? 0x204 : 0x201, r ? 2 : 1, 0);
-            if (fno == a->frame + 24) post(r ? 0x205 : 0x202, 0, 0);
+            if (fno == a->frame + 20) post(r ? 0x204 : 0x201, r ? 2 : 1, pos_lp());
+            if (fno == a->frame + 24) post(r ? 0x205 : 0x202, 0, pos_lp());
         } else if (!strcmp(a->kind, "press")) {           /* press:x,y: the left button pressed and held (until a later click) */
             if (fno == a->frame) { mot_home = 8; mot_dx = a->x; mot_dy = a->y; }
-            if (fno == a->frame + 20) post(0x201, 1, 0);
+            if (fno == a->frame + 20) post(0x201, 1, pos_lp());
         } else if (!strcmp(a->kind, "move") && fno == a->frame) { mot_home = 8; mot_dx = a->x; mot_dy = a->y; }
         else if (!strcmp(a->kind, "rel") && fno >= a->frame && fno < a->frame + 60) rel_motion(a->x / 60.0, a->y / 60.0);   /* x,y over 60 frames, like a trackpad swipe */
         else if (!strcmp(a->kind, "key")) {
