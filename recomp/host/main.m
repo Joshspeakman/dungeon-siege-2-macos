@@ -520,6 +520,7 @@ int main(int argc, char **argv)
             }
         }
         w32_crash_init(data, DS_BUILD); w32_crash_thread("macOS UI thread");
+        { void w32_registry_install(const char *); w32_registry_install(data); }   /* values the game's installer would have written */
         NSSetUncaughtExceptionHandler(on_objc_exception);
         ensure_resolution(drive_c);
         test_mode = getenv("DS_TEST") && atoi(getenv("DS_TEST"));

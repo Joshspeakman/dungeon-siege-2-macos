@@ -43,6 +43,30 @@ void w32_reg_string(const char *path, const char *name, const char *str)
     }
     pthread_mutex_unlock(&rlock);
 }
+/* What the game's installer would have written. The GOG and Steam releases never run that installer, so these are
+ * filled in from the data folder at start-up:
+ *   cdkey-hash.txt  DoubleHash, the 8-byte value the retail installer derives from the player's own product key
+ *                   (install.sh --cd-key computes it the way the installer does). The game shows it to GameSpy (now
+ *                   OpenSpy) as its CD key for multiplayer; without it multiplayer stops at "Could not find a valid
+ *                   CDKey". Only the hash is kept, never the key. */
+void w32_registry_install(const char *data_dir)
+{
+    char p[1200], hex[64] = ""; snprintf(p, sizeof p, "%s/cdkey-hash.txt", data_dir);
+    FILE *f = fopen(p, "r"); if (!f) return;
+    if (!fgets(hex, sizeof hex, f)) hex[0] = 0;
+    fclose(f);
+    uint8_t b[8]; int n = 0;
+    for (const char *q = hex; n < 8 && q[0] && q[1]; q += 2) { unsigned v; if (sscanf(q, "%2x", &v) != 1) break; b[n++] = (uint8_t)v; }
+    if (n != 8) { fprintf(stderr, "w32: %s: expected 16 hex digits\n", p); return; }
+    pthread_mutex_lock(&rlock);
+    RKey *k = lookup("hklm\\software\\microsoft\\microsoft games\\dungeonsiege2", 1);
+    if (k) {
+        RVal *v = 0; for (int j = 0; j < k->nv; j++) if (!strcasecmp(k->v[j].name, "DoubleHash")) v = &k->v[j];
+        if (!v) { k->v = realloc(k->v, (size_t)(k->nv + 1) * sizeof *k->v); v = &k->v[k->nv++]; memset(v, 0, sizeof *v); snprintf(v->name, sizeof v->name, "DoubleHash"); }
+        free(v->data); v->type = 3; v->size = 8; v->data = malloc(8); memcpy(v->data, b, 8);   /* REG_BINARY */
+    }
+    pthread_mutex_unlock(&rlock);
+}
 static void reg_seed(void)
 {
     static int done; if (done) return; done = 1;
