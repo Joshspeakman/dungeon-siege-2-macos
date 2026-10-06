@@ -29,11 +29,11 @@ struct DSRRenderer {
     id<MTLBuffer> ring; uint32_t ring_off, ring_size; id<MTLBuffer> white;
     /* pipeline, depth and sampler states by key: open-addressing tables (keys never 0), no Objective-C boxing per draw */
     uint64_t pso_k[1024]; id<MTLRenderPipelineState> pso_v[1024];
-    uint32_t dso_k[64]; id<MTLDepthStencilState> dso_v[64];
+    uint64_t dso_k[64]; id<MTLDepthStencilState> dso_v[64];
     uint32_t smp_k[1024]; id<MTLSamplerState> smp_v[1024]; int pso_n, dso_n, smp_n; uint32_t pso_last;   // filled at most 3/4, then uncached
     /* the current render encoder's state, so unchanged state isn't set again (cleared with each new encoder) */
-    struct { __unsafe_unretained id pso, dso, tex[2], smp[2]; int cull, ring_bound; MTLViewport vp; } es;
-    id<MTLRenderPipelineState> quad_pso, quad_over_pso, zclear_pso, present_pso; id<MTLTexture> scratch, gamma_lut; uint16_t gamma[3][256]; int gamma_dirty; id<MTLDepthStencilState> zclear_ds, nodepth_ds;
+    struct { __unsafe_unretained id pso, dso, tex[2], smp[2]; int cull, ring_bound; uint32_t sref; MTLViewport vp; } es;
+    id<MTLRenderPipelineState> quad_pso, quad_over_pso, zclear_pso, present_pso; id<MTLTexture> scratch, gamma_lut; uint16_t gamma[3][256]; int gamma_dirty; id<MTLDepthStencilState> zclear_ds, nodepth_ds, zsclear_ds[4];
     id<MTLSamplerState> point_clamp, linear_clamp; id<MTLTexture> dummy;
     uint32_t presented;
     id<MTLBuffer> rb_buf; volatile uint32_t *rb_done;
@@ -66,7 +66,7 @@ DSRRenderer *dsr_renderer_create(id<MTLDevice> dev)
     { uint32_t w = 0xffffffff; r->white = [dev newBufferWithBytes:&w length:16 options:MTLResourceStorageModeShared]; }
     for (int k = 0; k < 32; k++) mat_ident(r->xf[k]);
     for (int k = 0; k < 256; k++) r->rs[k] = 0;
-    r->rs[7] = 1; r->rs[14] = 1; r->rs[23] = 4; r->rs[22] = 3; r->rs[19] = 2; r->rs[20] = 1; r->rs[25] = 8;   // ZENABLE, ZWRITE, ZFUNC LEQUAL, CULL CCW, SRC ONE, DST ZERO, AFUNC ALWAYS
+    r->rs[168] = 15; r->rs[56] = 8; r->rs[58] = r->rs[59] = 0xff; r->rs[53] = r->rs[54] = r->rs[55] = 1; r->rs[7] = 1; r->rs[14] = 1; r->rs[23] = 4; r->rs[22] = 3; r->rs[19] = 2; r->rs[20] = 1; r->rs[25] = 8;   // ZENABLE, ZWRITE, ZFUNC LEQUAL, CULL CCW, SRC ONE, DST ZERO, AFUNC ALWAYS
     for (int st = 0; st < 8; st++) { r->tss[st][1] = st ? 1 : 4; r->tss[st][2] = 2; r->tss[st][3] = 1; r->tss[st][4] = st ? 1 : 2; r->tss[st][5] = 2; r->tss[st][6] = 1;
                                      r->tss[st][11] = st; r->tss[st][13] = r->tss[st][14] = 1; r->tss[st][16] = r->tss[st][17] = 2; r->tss[st][18] = 1; }
     {   MTLRenderPipelineDescriptor *d = [MTLRenderPipelineDescriptor new];
@@ -79,12 +79,18 @@ DSRRenderer *dsr_renderer_create(id<MTLDevice> dev)
         r->quad_over_pso = [dev newRenderPipelineStateWithDescriptor:d error:&err];
         d.colorAttachments[0].blendingEnabled = NO;
         d.vertexFunction = [r->lib newFunctionWithName:@"vs_zclear"]; d.fragmentFunction = nil;
-        d.colorAttachments[0].writeMask = MTLColorWriteMaskNone; d.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+        d.colorAttachments[0].writeMask = MTLColorWriteMaskNone; d.depthAttachmentPixelFormat = d.stencilAttachmentPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
         r->zclear_pso = [dev newRenderPipelineStateWithDescriptor:d error:&err];
         if (!r->quad_pso || !r->zclear_pso) { fprintf(stderr, "helper pipelines: %s\n", err.localizedDescription.UTF8String); exit(1); }
         MTLDepthStencilDescriptor *z = [MTLDepthStencilDescriptor new]; z.depthCompareFunction = MTLCompareFunctionAlways; z.depthWriteEnabled = YES;
         r->zclear_ds = [dev newDepthStencilStateWithDescriptor:z];
-        z.depthWriteEnabled = NO; r->nodepth_ds = [dev newDepthStencilStateWithDescriptor:z]; }
+        z.depthWriteEnabled = NO; r->nodepth_ds = [dev newDepthStencilStateWithDescriptor:z];
+        for (int k = 1; k < 4; k++) {                       // clears: [1] depth, [2] stencil, [3] both (stencil = the reference value)
+            MTLDepthStencilDescriptor *c = [MTLDepthStencilDescriptor new]; c.depthCompareFunction = MTLCompareFunctionAlways; c.depthWriteEnabled = (k & 1) != 0;
+            if (k & 2) { MTLStencilDescriptor *sd = [MTLStencilDescriptor new]; sd.stencilCompareFunction = MTLCompareFunctionAlways;
+                         sd.depthStencilPassOperation = MTLStencilOperationReplace; sd.writeMask = 0xff; c.frontFaceStencil = c.backFaceStencil = sd; }
+            r->zsclear_ds[k] = [dev newDepthStencilStateWithDescriptor:c];
+        } }
     {   MTLRenderPipelineDescriptor *d = [MTLRenderPipelineDescriptor new];
         d.vertexFunction = [r->lib newFunctionWithName:@"vs_present"]; d.fragmentFunction = [r->lib newFunctionWithName:@"fs_present"];
         d.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
@@ -145,7 +151,8 @@ static id<MTLRenderCommandEncoder> enc_for(DSRRenderer *r, uint32_t rt, uint32_t
     Surf *c = surf(r, rt), *z = surf(r, ds); if (!c) return nil;
     MTLRenderPassDescriptor *p = [MTLRenderPassDescriptor renderPassDescriptor];
     p.colorAttachments[0].texture = c->tex; p.colorAttachments[0].loadAction = MTLLoadActionLoad; p.colorAttachments[0].storeAction = MTLStoreActionStore;
-    if (z) { p.depthAttachment.texture = z->tex; p.depthAttachment.loadAction = MTLLoadActionLoad; p.depthAttachment.storeAction = MTLStoreActionStore; }
+    if (z) { p.depthAttachment.texture = z->tex; p.depthAttachment.loadAction = MTLLoadActionLoad; p.depthAttachment.storeAction = MTLStoreActionStore;
+             p.stencilAttachment.texture = z->tex; p.stencilAttachment.loadAction = MTLLoadActionLoad; p.stencilAttachment.storeAction = MTLStoreActionStore; }
     r->enc = [cmdbuf(r) renderCommandEncoderWithDescriptor:p]; r->enc_rt = rt; r->enc_ds = z ? ds : 0; r->encoders++;
     memset(&r->es, 0, sizeof r->es); r->es.cull = -1;
     [r->enc setFrontFacingWinding:MTLWindingClockwise];   // same convention as D3D
@@ -165,7 +172,7 @@ static void surface_create(DSRRenderer *r, const uint32_t *p, uint32_t size)
         d.mipmapLevelCount = levels; d.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget; d.storageMode = MTLStorageModePrivate;   // XRGB: alpha forced to 1 in the shader (swizzles can't be render targets)
         s->tex = [r->dev newTextureWithDescriptor:d];
     } else {
-        MTLPixelFormat pf = fmt == 3 ? MTLPixelFormatDepth32Float : MTLPixelFormatBGRA8Unorm;
+        MTLPixelFormat pf = fmt == 3 ? MTLPixelFormatDepth32Float_Stencil8 : MTLPixelFormatBGRA8Unorm;   // depth buffers carry an 8-bit stencil
         MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pf width:w height:h mipmapped:NO];
         d.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget; d.storageMode = MTLStorageModePrivate;   // XRGB targets: alpha is never read back as destination alpha
         s->tex = [r->dev newTextureWithDescriptor:d];
@@ -233,7 +240,8 @@ static id<MTLRenderPipelineState> pipeline_for(DSRRenderer *r, uint32_t fvf, int
 {
     uint32_t blend = r->rs[27] ? 1 : 0, sb = blend ? r->rs[19] : 2, db = blend ? r->rs[20] : 1;
     uint32_t atest = r->rs[15] ? 1 : 0;                                                       // D3DRS_ALPHATESTENABLE
-    uint64_t key = ((uint64_t)fvf << 32) | (blend << 16) | (sb << 8) | (db << 4) | atest << 2 | (uint64_t)has_depth << 1 | 1;   // never 0
+    uint32_t cw = r->rs[168] & 15;                                                            // D3DRS_COLORWRITEENABLE (R1 G2 B4 A8)
+    uint64_t key = ((uint64_t)fvf << 32) | (uint64_t)cw << 20 | (blend << 16) | (sb << 8) | (db << 4) | atest << 2 | (uint64_t)has_depth << 1 | 1;   // never 0
     if (key == r->pso_k[r->pso_last]) return r->pso_v[r->pso_last];                                         // same as the last draw
     uint32_t h = (uint32_t)((key * 0x9e3779b97f4a7c15ull) >> 54);
     while (r->pso_k[h] && r->pso_k[h] != key) h = (h + 1) & 1023;
@@ -244,7 +252,8 @@ static id<MTLRenderPipelineState> pipeline_for(DSRRenderer *r, uint32_t fvf, int
     {   MTLFunctionConstantValues *fc = [MTLFunctionConstantValues new]; bool at = atest; [fc setConstantValue:&at type:MTLDataTypeBool atIndex:0];
         d.fragmentFunction = [r->lib newFunctionWithName:@"fs_main" constantValues:fc error:&err]; }
     d.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
-    if (has_depth) d.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+    if (has_depth) d.depthAttachmentPixelFormat = d.stencilAttachmentPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
+    d.colorAttachments[0].writeMask = (cw & 1 ? MTLColorWriteMaskRed : 0) | (cw & 2 ? MTLColorWriteMaskGreen : 0) | (cw & 4 ? MTLColorWriteMaskBlue : 0) | (cw & 8 ? MTLColorWriteMaskAlpha : 0);
     if (blend) { d.colorAttachments[0].blendingEnabled = YES; d.colorAttachments[0].sourceRGBBlendFactor = d.colorAttachments[0].sourceAlphaBlendFactor = bf(sb);
                  d.colorAttachments[0].destinationRGBBlendFactor = d.colorAttachments[0].destinationAlphaBlendFactor = bf(db); }
     MTLVertexDescriptor *v = [MTLVertexDescriptor vertexDescriptor]; uint32_t off = 0;
@@ -268,14 +277,31 @@ static id<MTLRenderPipelineState> pipeline_for(DSRRenderer *r, uint32_t fvf, int
     if (r->pso_n < 768) { r->pso_k[h] = key; r->pso_v[h] = p; r->pso_n++; r->pso_last = h; }   // the game uses a few dozen
     return p;
 }
+static MTLStencilOperation sop(uint32_t o)
+{
+    switch (o) { case 2: return MTLStencilOperationZero; case 3: return MTLStencilOperationReplace; case 4: return MTLStencilOperationIncrementClamp;
+    case 5: return MTLStencilOperationDecrementClamp; case 6: return MTLStencilOperationInvert; case 7: return MTLStencilOperationIncrementWrap;
+    case 8: return MTLStencilOperationDecrementWrap; default: return MTLStencilOperationKeep; }
+}
+/* depth test/write and the stencil test (D3DRS_STENCIL*: 52 enable, 53 fail, 54 z-fail, 55 pass, 56 function, 58 read
+ * mask, 59 write mask; the reference, 57, is set on the encoder) */
 static id<MTLDepthStencilState> depth_for(DSRRenderer *r)
 {
-    uint32_t en = r->rs[7] ? 1 : 0, wr = en && r->rs[14] ? 1 : 0, fn = en ? r->rs[23] : 8;
-    uint32_t key = (en << 16) | (wr << 8) | (fn << 1) | 1, h = (key * 2654435761u) >> 26;
+    uint32_t en = r->rs[7] ? 1 : 0, wr = en && r->rs[14] ? 1 : 0, fn = en ? r->rs[23] : 8, st = r->rs[52] ? 1 : 0;
+    uint64_t key = (uint64_t)(en << 16 | wr << 8 | fn << 1 | 1);
+    if (st) key |= (uint64_t)1 << 20 | (uint64_t)(r->rs[53] & 15) << 24 | (uint64_t)(r->rs[54] & 15) << 28 | (uint64_t)(r->rs[55] & 15) << 32
+                 | (uint64_t)(r->rs[56] & 15) << 36 | (uint64_t)(r->rs[58] & 255) << 40 | (uint64_t)(r->rs[59] & 255) << 48;
+    uint32_t h = (uint32_t)((key * 0x9e3779b97f4a7c15ull) >> 58);
     while (r->dso_k[h] && r->dso_k[h] != key) h = (h + 1) & 63;
     if (r->dso_k[h]) return r->dso_v[h];
     id<MTLDepthStencilState> s;
     MTLDepthStencilDescriptor *d = [MTLDepthStencilDescriptor new]; d.depthCompareFunction = en ? cmpf(fn) : MTLCompareFunctionAlways; d.depthWriteEnabled = wr;
+    if (st) {
+        MTLStencilDescriptor *sd = [MTLStencilDescriptor new];
+        sd.stencilCompareFunction = cmpf(r->rs[56]); sd.stencilFailureOperation = sop(r->rs[53]); sd.depthFailureOperation = sop(r->rs[54]);
+        sd.depthStencilPassOperation = sop(r->rs[55]); sd.readMask = r->rs[58] & 255; sd.writeMask = r->rs[59] & 255;
+        d.frontFaceStencil = d.backFaceStencil = sd;
+    }
     s = [r->dev newDepthStencilStateWithDescriptor:d]; if (r->dso_n < 48) { r->dso_k[h] = key; r->dso_v[h] = s; r->dso_n++; } return s;
 }
 static id<MTLSamplerState> sampler_for(DSRRenderer *r, int st)
@@ -335,6 +361,7 @@ static void draw(DSRRenderer *r, const uint32_t *p, uint32_t size)
     id<MTLDepthStencilState> dso = depth_for(r);
     if (r->es.pso != pso) { [e setRenderPipelineState:pso]; r->es.pso = pso; }
     if (r->es.dso != dso) { [e setDepthStencilState:dso]; r->es.dso = dso; }
+    if (r->rs[52] && r->es.sref != (r->rs[57] & 255) + 1) { [e setStencilReferenceValue:r->rs[57] & 255]; r->es.sref = (r->rs[57] & 255) + 1; }
     uint32_t cull = r->rs[22];
     int cm = cull == 2 ? MTLCullModeFront : cull == 3 ? MTLCullModeBack : MTLCullModeNone;   // D3DCULL_CW culls clockwise (= front here)
     if (r->es.cull != cm) { [e setCullMode:(MTLCullMode)cm]; r->es.cull = cm; }
@@ -361,12 +388,13 @@ static void draw(DSRRenderer *r, const uint32_t *p, uint32_t size)
     } else if (ni) [e drawIndexedPrimitives:pt indexCount:ni indexType:MTLIndexTypeUInt16 indexBuffer:r->ring indexBufferOffset:ioff];
     else [e drawPrimitives:pt vertexStart:0 vertexCount:nv];
 }
-static void clear_rect(DSRRenderer *r, uint32_t flags, uint32_t color, float z, const int32_t *rc, int has_ds)
+static void clear_rect(DSRRenderer *r, uint32_t flags, uint32_t color, float z, uint32_t stencil, const int32_t *rc, int has_ds)
 {
     if (flags & 1) quad(r, r->rt, rc, 0, rc, 1, color);                          // D3DCLEAR_TARGET
-    if ((flags & 2) && has_ds) {                                                // D3DCLEAR_ZBUFFER
+    if ((flags & 6) && has_ds) {                                                // D3DCLEAR_ZBUFFER, D3DCLEAR_STENCIL
         id<MTLRenderCommandEncoder> e = enc_for(r, r->rt, r->ds); float zz[4] = {z, 0, 0, 0};
-        [e setRenderPipelineState:r->zclear_pso]; [e setDepthStencilState:r->zclear_ds]; [e setCullMode:MTLCullModeNone];
+        [e setRenderPipelineState:r->zclear_pso]; [e setDepthStencilState:r->zsclear_ds[(flags >> 1) & 3]]; [e setCullMode:MTLCullModeNone];
+        if (flags & 4) [e setStencilReferenceValue:stencil & 255];
         [e setViewport:(MTLViewport){rc[0], rc[1], rc[2] - rc[0], rc[3] - rc[1], 0, 1}];
         [e setVertexBytes:zz length:16 atIndex:0]; [e drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
         memset(&r->es, 0, sizeof r->es); r->es.cull = -1;
@@ -391,7 +419,7 @@ static void clear(DSRRenderer *r, const uint32_t *p, uint32_t size)
         if (rc[1] < full[1]) rc[1] = full[1];
         if (rc[2] > full[2]) rc[2] = full[2];
         if (rc[3] > full[3]) rc[3] = full[3];
-        if (rc[2] > rc[0] && rc[3] > rc[1]) clear_rect(r, flags, color, z, rc, ds != 0);
+        if (rc[2] > rc[0] && rc[3] > rc[1]) clear_rect(r, flags, color, z, p[3], rc, ds != 0);
     }
     if (getenv("DSR_CHECKCLEAR")) {
         static int n; if (n++ < 4) {
