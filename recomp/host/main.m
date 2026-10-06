@@ -35,6 +35,9 @@ static CAMetalLayer *layer; static NSWindow *win; static uint32_t game_hwnd;
 static volatile int game_running = 1;
 static const char *script_tick(uint32_t fno);
 static int test_mode;                  // DS_TEST=1: ordinary background window, never captures the mouse or takes focus
+#include "frame_trace.h"
+static DSFrameTrace frame_trace;       // DS_FRAME_TRACE=<file.csv>: every presented frame's timing, written when the game ends (the Linux port's format)
+static int lab_mode;                   // DS_TEST_LAB=1: the game in an ordinary window beside the Test Lab's; a click captures the mouse, F12 releases it
 
 // ---------------------------------------------------------------- rendering
 void w32_crash_init(const char *data_dir, const char *build); void w32_crash_thread(const char *name);
@@ -106,11 +109,15 @@ static void *render_thread(void *arg)
                             } else if (tex) fprintf(stderr, "DungeonSiegeNative: screenshot: unexpected pixel format %lu\n", (unsigned long)tex.pixelFormat);
                         }
                     }
+                    uint64_t t_ready = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
                     id<CAMetalDrawable> d = [layer nextDrawable];
                     id<MTLCommandBuffer> cb = d ? dsr_renderer_present_to(r, d.texture) : nil;
+                    size_t ti = frame_trace.count;
+                    if (frame_trace.samples) ds_trace_add(&frame_trace, t_ready, clock_gettime_nsec_np(CLOCK_UPTIME_RAW), 0, w, h);
                     if (cb) {
                         [cb presentDrawable:d]; w32_crash_heartbeat(3);
-                        [cb addCompletedHandler:^(id<MTLCommandBuffer> c) { (void)c; __atomic_store_n(&H->frames_done, fno, __ATOMIC_RELEASE); }];
+                        [cb addCompletedHandler:^(id<MTLCommandBuffer> c) { (void)c; __atomic_store_n(&H->frames_done, fno, __ATOMIC_RELEASE);
+                            if (frame_trace.samples && ti < frame_trace.count) frame_trace.samples[ti].done = clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }];
                         dsr_renderer_flush(r, 0);
                     } else { dsr_renderer_flush(r, 0); __atomic_store_n(&H->frames_done, fno, __ATOMIC_RELEASE); }
                 }
@@ -269,6 +276,7 @@ static void key_event(uint16_t code, int down, int repeat)
 
 /* A borderless window cannot become the key window by default, so it would get no keyboard events (only the mouse,
  * which goes to the window under the pointer). */
+static void capture(int on);
 @interface GameWindow : NSWindow @end
 @implementation GameWindow
 - (BOOL)canBecomeKeyWindow { return YES; }
@@ -303,7 +311,8 @@ static void rel_motion(double gx, double gy)
 - (void)mouseDragged:(NSEvent *)e { [self moved:e]; }
 - (void)rightMouseDragged:(NSEvent *)e { [self moved:e]; }
 - (void)otherMouseDragged:(NSEvent *)e { [self moved:e]; }
-- (void)mouseDown:(NSEvent *)e { buttons |= 1; w32_keys[1] = 0x80; post(e.clickCount == 2 ? 0x203 : 0x201, mk(), pos_lp()); }
+- (void)mouseDown:(NSEvent *)e { if (lab_mode) capture(1);                           /* lab: a click in the game takes the mouse */
+                               buttons |= 1; w32_keys[1] = 0x80; post(e.clickCount == 2 ? 0x203 : 0x201, mk(), pos_lp()); }
 - (void)mouseUp:(NSEvent *)e { buttons &= ~1u; w32_keys[1] = 0; post(0x202, mk(), pos_lp()); }
 - (void)rightMouseDown:(NSEvent *)e { buttons |= 2; w32_keys[2] = 0x80; post(e.clickCount == 2 ? 0x206 : 0x204, mk(), pos_lp()); }
 - (void)rightMouseUp:(NSEvent *)e { buttons &= ~2u; w32_keys[2] = 0; post(0x205, mk(), pos_lp()); }
@@ -317,6 +326,7 @@ static void rel_motion(double gx, double gy)
 - (void)keyDown:(NSEvent *)e
 {
     if (e.modifierFlags & NSEventModifierFlagCommand) { [super keyDown:e]; return; }
+    if (lab_mode && e.keyCode == 0x6f) { capture(0); return; }       /* F12: the mouse back, for the Test Lab's window */
     key_event(e.keyCode, 1, e.ARepeat);
     NSString *s = e.characters;
     for (NSUInteger k = 0; k < s.length; k++) {
@@ -355,10 +365,15 @@ static void window_created(uint32_t hwnd, int x, int y, int w, int h, uint32_t s
         NSRect f = NSScreen.mainScreen.frame;
         NSWindowStyleMask sm = NSWindowStyleMaskBorderless;
         if (test_mode) { f = NSMakeRect(80, 80, 960, 620); sm = NSWindowStyleMaskTitled | NSWindowStyleMaskMiniaturizable; }
+        else if (lab_mode) {                                          /* the left of the screen; the Test Lab's window takes the right */
+            NSRect v = NSScreen.mainScreen.visibleFrame; CGFloat w = floor(v.size.width - 560), h = floor(fmin(v.size.height - 40, w * 0.625));
+            f = NSMakeRect(v.origin.x + 10, NSMaxY(v) - h - 30, w - 20, h);
+            sm = NSWindowStyleMaskTitled | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+        }
         win = [[GameWindow alloc] initWithContentRect:f styleMask:sm backing:NSBackingStoreBuffered defer:NO];
         win.releasedWhenClosed = NO;   /* ARC owns it (AppKit's default releases a closed window once more) */
         f.origin = NSZeroPoint;
-        win.title = @"Dungeon Siege"; win.backgroundColor = NSColor.blackColor; win.acceptsMouseMovedEvents = YES;
+        win.title = lab_mode ? @"Dungeon Siege II — Test Lab" : @"Dungeon Siege"; win.backgroundColor = NSColor.blackColor; win.acceptsMouseMovedEvents = YES;
         GameView *v = [[GameView alloc] initWithFrame:f]; v.wantsLayer = YES;
         win.contentView = v; [win makeFirstResponder:v];
         win.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
@@ -373,6 +388,7 @@ static void window_changed(uint32_t hwnd, int x, int y, int w, int h, int visibl
         if (!win) return;
         if (visible && !win.visible) {
             if (test_mode) [win orderBack:nil];
+            else if (lab_mode) { [win makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; void lab_window_show(void); lab_window_show(); }
             else {
                 [NSApp setPresentationOptions:NSApplicationPresentationHideDock | NSApplicationPresentationHideMenuBar];
                 [win makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; capture(1);
@@ -443,9 +459,9 @@ static void type_text(NSString *text)
 
 @interface AppDelegate : NSObject <NSApplicationDelegate> @end
 @implementation AppDelegate
-- (void)applicationDidBecomeActive:(NSNotification *)n { (void)n; if (win.visible) capture(1); post(0x1c, 1, 0); }
+- (void)applicationDidBecomeActive:(NSNotification *)n { (void)n; if (win.visible && !lab_mode) capture(1); post(0x1c, 1, 0); }
 - (void)applicationDidResignActive:(NSNotification *)n { (void)n; capture(0); post(0x1c, 0, 0); }
-- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)s { (void)s; return NSTerminateNow; }
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)s { (void)s; ds_trace_save(&frame_trace); frame_trace.samples = NULL; return NSTerminateNow; }
 @end
 
 /* After a crash: say so, and offer the report (not in test mode). */
@@ -462,6 +478,7 @@ static void *game_thread(void *arg)
     (void)arg; char msg[256];
     uint32_t code = w32_run(msg, sizeof msg);
     fprintf(stderr, "DungeonSiegeNative: game ended: %s\n", msg);
+    usleep(100000); ds_trace_save(&frame_trace); frame_trace.samples = NULL;
     game_running = 0;
     const char *rp = !strncmp(msg, "fault", 5) ? w32_crash_last_path() : 0;
     NSString *path = rp ? @(rp) : nil;
@@ -516,14 +533,47 @@ int main(int argc, char **argv)
             int ds_launcher_run(const char *game_dir, const char *data_dir);
             if (!getenv("DS_TEST") || getenv("DS_LAUNCHER_SHOT")) {
                 [NSApplication sharedApplication]; [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-                if (!ds_launcher_run(game, data)) return 0;
+                int lr = ds_launcher_run(game, data);
+                if (!lr) return 0;
+                if (lr >= 2) {   /* the Test Lab: its own data folder (<data>/test-lab) with copies of the single-player saves */
+                    static char lab[1024]; snprintf(lab, sizeof lab, "%s/test-lab", data);
+                    NSString *rel = @"drive_c/Users/player/Documents/My Games/Dungeon Siege 2/Save/SinglePlayer";
+                    NSString *src = [@(data) stringByAppendingPathComponent:rel], *dst = [@(lab) stringByAppendingPathComponent:rel];
+                    NSFileManager *fm = NSFileManager.defaultManager;
+                    if (lr == 3 || ![fm fileExistsAtPath:dst]) {
+                        if ([fm fileExistsAtPath:dst]) {
+                            NSString *bk = [NSString stringWithFormat:@"%s/save-backups/%.0f", lab, [NSDate date].timeIntervalSince1970 * 1000];
+                            [fm createDirectoryAtPath:bk.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+                            [fm moveItemAtPath:dst toPath:bk error:nil];
+                        }
+                        [fm createDirectoryAtPath:dst.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+                        if (![fm copyItemAtPath:src toPath:dst error:nil]) [fm createDirectoryAtPath:dst withIntermediateDirectories:YES attributes:nil error:nil];
+                        for (NSString *f in @[@"Save/prefs.gas", @"DungeonSiege2.ini"]) {   /* the game's options too (Shaders among them) */
+                            NSString *dir = @"drive_c/Users/player/Documents/My Games/Dungeon Siege 2";
+                            NSString *from = [[@(data) stringByAppendingPathComponent:dir] stringByAppendingPathComponent:f], *to = [[@(lab) stringByAppendingPathComponent:dir] stringByAppendingPathComponent:f];
+                            if ([fm fileExistsAtPath:from]) { [fm removeItemAtPath:to error:nil]; [fm copyItemAtPath:from toPath:to error:nil]; }
+                        }
+                    }
+                    data = lab; mkdir(data, 0700);
+                    snprintf(drive_c, sizeof drive_c, "%s/drive_c", data); snprintf(overlay, sizeof overlay, "%s/game", data); mkdir(drive_c, 0755); mkdir(overlay, 0755);
+                    char trace[1200]; snprintf(trace, sizeof trace, "%s/frames-%.0f.csv", data, [NSDate date].timeIntervalSince1970 * 1e3);
+                    setenv("DS_TEST_LAB", "1", 1); setenv("DS_NO_PORTMAP", "1", 1); setenv("DS_FRAME_TRACE", trace, 1);
+                }
             }
+        }
+        if (getenv("DS_TEST_LAB") && !strcmp(getenv("DS_TEST_LAB"), "1")) {   /* the lab window's helper scripts: in the app, or beside a development build */
+            NSString *t = [bin stringByAppendingPathComponent:@"../Resources/test_lab"];
+            if (![NSFileManager.defaultManager fileExistsAtPath:t]) t = [bin stringByAppendingPathComponent:@"../../../host/test_lab"];
+            if (getenv("DS_LAB_TOOLS")) t = @(getenv("DS_LAB_TOOLS"));
+            void lab_window_setup(const char *, const char *, const char *); lab_window_setup(data, game, t.stringByStandardizingPath.UTF8String);
         }
         w32_crash_init(data, DS_BUILD); w32_crash_thread("macOS UI thread");
         { void w32_registry_install(const char *); w32_registry_install(data); }   /* values the game's installer would have written */
         NSSetUncaughtExceptionHandler(on_objc_exception);
         ensure_resolution(drive_c);
         test_mode = getenv("DS_TEST") && atoi(getenv("DS_TEST"));
+        ds_trace_init(&frame_trace);
+        lab_mode = !test_mode && getenv("DS_TEST_LAB") && !strcmp(getenv("DS_TEST_LAB"), "1");
         if (test_mode) parse_script();
 
         [NSApplication sharedApplication]; [NSApp setActivationPolicy:test_mode ? NSApplicationActivationPolicyAccessory : NSApplicationActivationPolicyRegular];
@@ -541,6 +591,7 @@ int main(int argc, char **argv)
         dsr_attach_consumer(H);
         w32_host_window_created = window_created; w32_host_window_changed = window_changed;
         if (w32_prepare(exe, game, drive_c, overlay)) { fprintf(stderr, "DungeonSiegeNative: cannot load %s\n", exe); return 1; }
+        { void w32_lab_init(const char *); w32_lab_init(data); }      /* DS_TEST_LAB=1: the Test Lab's bridge (runtime/win32/test_lab.c) */
         if (!test_mode) report_from_last_session(data);
         [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *tm) { (void)tm; w32_crash_heartbeat(2); }];   /* UI thread alive */
         if (test_mode && getenv("DS_CRASHTEST") && !strncmp(getenv("DS_CRASHTEST"), "uihang", 6))

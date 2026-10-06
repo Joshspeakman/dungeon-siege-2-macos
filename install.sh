@@ -122,6 +122,7 @@ A="$APPS/$APP_NAME.app"; echo "== installing $A"
 mkdir -p "$APPS"; rm -rf "$A"; mkdir -p "$A/Contents/MacOS" "$A/Contents/Resources"
 cp "$HERE/recomp/work/full/app/DungeonSiegeNative" "$HERE/recomp/work/full/app/shaders.metal" "$HERE/recomp/work/full/app/dsr_snapshot.bin" "$A/Contents/MacOS/"
 cp "$HERE/recomp/work/DungeonSiege2.exe" "$A/Contents/Resources/DungeonSiege2.exe"
+mkdir -p "$A/Contents/Resources/test_lab"; cp "$HERE"/recomp/host/test_lab/*.py "$A/Contents/Resources/test_lab/"   # the Test Lab's helpers
 Q_GAME=$(printf '%q' "$GAME"); Q_DATA=$(printf '%q' "$DATA")      # shell-quoted: any folder name is only data
 # updates from the launcher: the branch this app follows (main, or nightly for Nightly), the commit it was built from and
 # the checkout it was installed from; its updater fetches the branch into a worktree there and rebuilds the app from it
