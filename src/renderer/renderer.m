@@ -8,7 +8,12 @@
 
 int dsr_verbose; long dsr_stat[8]; double dsr_gpu_ms[100000]; int dsr_frame;
 #define MAXSURF 65536
-typedef struct { id<MTLTexture> tex, view2d; uint32_t w, h, kind, fmt, level, root, slice; int used, fxrt; } Surf;   /* fxrt: an effect pass drew into it (DSR_GLOWLOG) */   /* cube faces: tex the cube, view2d the face as 2D */
+#define STAGE_SURF (MAXSURF - 2)    /* pixels for a scaled surface, before they are drawn into it larger (and reads, smaller) */
+/* w, h: the game's size of a surface. sc: how much larger its texture is (the interface size, DSR_RENDER_SCALE: the game
+ * runs at a smaller resolution, so its interface is laid out larger, and its screen-sized surfaces are drawn that much
+ * larger, at the display's own resolution). Positions stay in the game's units everywhere; they become texture pixels
+ * only where Metal is given a viewport, an upload or a copy. */
+typedef struct { id<MTLTexture> tex, view2d; uint32_t w, h, kind, fmt, level, root, slice; int used, fxrt; float sc; } Surf;   /* fxrt: an effect pass drew into it (DSR_GLOWLOG) */   /* cube faces: tex the cube, view2d the face as 2D */
 static inline id<MTLTexture> tex2d(const void *sp) { const Surf *s = sp; return s->view2d ? s->view2d : s->tex; }
 typedef struct {   // must match shaders.metal Uniforms
     float wvp[16], wv[16], tex0[16];
@@ -22,6 +27,7 @@ typedef struct {   // must match shaders.metal Uniforms
 } Uniforms;
 
 struct DSRRenderer {
+    float scale; uint32_t mode_w, mode_h;   /* the interface size (1: none) and the game's display mode */
     id<MTLDevice> dev; id<MTLCommandQueue> q; id<MTLLibrary> lib;
     Surf s[MAXSURF];
     uint32_t rs[256], tss[8][32]; float xf[32][16]; float vp[6]; uint32_t tex[8];
@@ -70,6 +76,7 @@ DSRRenderer *dsr_renderer_create(id<MTLDevice> dev)
     if (!r->lib) { fprintf(stderr, "shader compile failed: %s\n", err.localizedDescription.UTF8String); exit(1); }
     r->ring_size = 256u << 20; r->ring = [dev newBufferWithLength:r->ring_size options:MTLResourceStorageModeShared];
     { uint32_t w = 0xffffffff; r->white = [dev newBufferWithBytes:&w length:16 options:MTLResourceStorageModeShared]; }
+    { const char *sc = getenv("DSR_RENDER_SCALE"); r->scale = sc ? (float)atof(sc) : 1; if (!(r->scale >= 1 && r->scale <= 3)) r->scale = 1; }
     for (int k = 0; k < 32; k++) mat_ident(r->xf[k]);
     for (int k = 0; k < 256; k++) r->rs[k] = 0;
     r->rs[168] = 15; r->rs[56] = 8; r->rs[58] = r->rs[59] = 0xff; r->rs[53] = r->rs[54] = r->rs[55] = 1; r->rs[7] = 1; r->rs[14] = 1; r->rs[23] = 4; r->rs[22] = 3; r->rs[19] = 2; r->rs[20] = 1; r->rs[25] = 8;   // ZENABLE, ZWRITE, ZFUNC LEQUAL, CULL CCW, SRC ONE, DST ZERO, AFUNC ALWAYS
@@ -159,11 +166,21 @@ static id<MTLBlitCommandEncoder> blit_enc(DSRRenderer *r)
     return r->blit;
 }
 static Surf *surf(DSRRenderer *r, uint32_t id) { return (id && id < MAXSURF && r->s[id].used) ? &r->s[id] : NULL; }
+/* The depth buffer a target is drawn with: as Direct3D allows, one larger than the target (the game draws its 256x256
+ * glow target with the screen's), but not one smaller, which Metal can't (an unscaled depth buffer with a target
+ * enlarged by the interface size): then none. Draws ask the same, so their pipelines match the pass. */
+static Surf *depth_with(DSRRenderer *r, Surf *c, Surf *z)
+{
+    (void)r; if (!c || !z) return z;
+    NSUInteger cw = MAX(c->tex.width >> c->level, 1u), ch = MAX(c->tex.height >> c->level, 1u);
+    return z->tex.width < cw || z->tex.height < ch ? NULL : z;
+}
 static id<MTLRenderCommandEncoder> enc_for(DSRRenderer *r, uint32_t rt, uint32_t ds)
 {
     if (r->enc && r->enc_rt == rt && r->enc_ds == ds) return r->enc;
     end_enc(r); maybe_commit(r);
     Surf *c = surf(r, rt), *z = surf(r, ds); if (!c) return nil;
+    z = depth_with(r, c, z);
     MTLRenderPassDescriptor *p = [MTLRenderPassDescriptor renderPassDescriptor];
     p.colorAttachments[0].texture = c->tex; p.colorAttachments[0].loadAction = MTLLoadActionLoad; p.colorAttachments[0].storeAction = MTLStoreActionStore;
     p.colorAttachments[0].slice = c->slice; p.colorAttachments[0].level = c->level;
@@ -181,7 +198,11 @@ static void surface_create(DSRRenderer *r, const uint32_t *p, uint32_t size)
     uint32_t id = p[0], w = p[1], h = p[2], kind = p[3], fmt = p[4], parent = p[5], level = p[6];
     uint32_t face = size >= 40 ? p[8] : 0, cube = size >= 40 && (p[9] & 1);
     if (id >= MAXSURF) return;
-    Surf *s = &r->s[id]; s->tex = s->view2d = nil; s->used = 1; s->fxrt = 0; s->w = w; s->h = h; s->kind = kind; s->fmt = fmt; s->level = level; s->root = id; s->slice = face;
+    Surf *s = &r->s[id]; s->tex = s->view2d = nil; s->used = 1; s->fxrt = 0; s->w = w; s->h = h; s->kind = kind; s->fmt = fmt; s->level = level; s->root = id; s->slice = face; s->sc = 1;
+    /* the screen's surfaces (the back buffer, depth buffers and textures the size of the screen, which the game draws into
+     * with the screen's depth buffer) are drawn larger with an interface size */
+    float sc = r->scale > 1 && !parent && !cube && w == r->mode_w && h == r->mode_h && !(kind == 3 && size >= 32 && p[7] > 1) ? r->scale : 1;
+    uint32_t pw = (uint32_t)lroundf(w * sc), ph = (uint32_t)lroundf(h * sc);
     if (parent && surf(r, parent)) {                       // a mip level (or another cube face): shares the root's texture
         Surf *root = surf(r, parent); s->tex = root->tex; s->root = parent;
         if (cube && level == 0)                            // a cube face: its own 2D view
@@ -197,21 +218,43 @@ static void surface_create(DSRRenderer *r, const uint32_t *p, uint32_t size)
         s->view2d = [s->tex newTextureViewWithPixelFormat:MTLPixelFormatBGRA8Unorm textureType:MTLTextureType2D levels:NSMakeRange(0, levels) slices:NSMakeRange(0, 1)];
     } else if (kind == 3 && parent == 0) {
         uint32_t levels = size >= 32 && p[7] ? p[7] : 1;
-        MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:w height:h mipmapped:levels > 1];
+        MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:pw height:ph mipmapped:levels > 1];
         d.mipmapLevelCount = levels; d.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget; d.storageMode = MTLStorageModePrivate;   // XRGB: alpha forced to 1 in the shader (swizzles can't be render targets)
-        s->tex = [r->dev newTextureWithDescriptor:d];
+        s->tex = [r->dev newTextureWithDescriptor:d]; s->sc = sc;
     } else {
         MTLPixelFormat pf = fmt == 3 ? MTLPixelFormatDepth32Float_Stencil8 : MTLPixelFormatBGRA8Unorm;   // depth buffers carry an 8-bit stencil
-        MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pf width:w height:h mipmapped:NO];
+        MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pf width:pw height:ph mipmapped:NO];
         d.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget; d.storageMode = MTLStorageModePrivate;   // XRGB targets: alpha is never read back as destination alpha
-        s->tex = [r->dev newTextureWithDescriptor:d];
+        s->tex = [r->dev newTextureWithDescriptor:d]; s->sc = sc;
     }
+}
+static void quad(DSRRenderer *r, uint32_t dst, const int32_t *drect, uint32_t src, const int32_t *srect, int fill, uint32_t color);
+static Surf *stage(DSRRenderer *r, uint32_t w, uint32_t h)   /* an unscaled texture at least w x h (STAGE_SURF) */
+{
+    Surf *g = &r->s[STAGE_SURF];
+    if (!g->tex || g->tex.width < w || g->tex.height < h) {
+        MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:MAX(w, g->tex.width) height:MAX(h, g->tex.height) mipmapped:NO];
+        d.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget; d.storageMode = MTLStorageModePrivate;
+        g->tex = [r->dev newTextureWithDescriptor:d]; g->view2d = nil; g->used = 1; g->kind = 4; g->fmt = 1; g->level = 0; g->root = STAGE_SURF; g->slice = 0; g->sc = 1;
+    }
+    g->w = (uint32_t)g->tex.width; g->h = (uint32_t)g->tex.height; return g;
 }
 static void surface_upload(DSRRenderer *r, const uint32_t *p, uint32_t size)
 {
     Surf *s = surf(r, p[0]); if (!s || s->fmt == 3) return;
     uint32_t x = p[1], y = p[2], w = p[3], h = p[4], pitch = p[5], off;
     if (!w || !h || 24 + (uint64_t)pitch * h > size) return;                     /* 64-bit: no wrap */
+    if (s->sc != 1) {                                                            /* a scaled target: its pixels go to the stage first */
+        if ((uint64_t)x + w > s->w || (uint64_t)y + h > s->h) return;
+        Surf *g = stage(r, w, h);
+        if (!r->enc) maybe_commit(r);
+        void *dst = ring_alloc(r, pitch * h, &off); memcpy(dst, p + 6, pitch * h);
+        [blit_enc(r) copyFromBuffer:r->ring sourceOffset:off sourceBytesPerRow:pitch sourceBytesPerImage:pitch * h sourceSize:MTLSizeMake(w, h, 1)
+                toTexture:g->tex destinationSlice:0 destinationLevel:0 destinationOrigin:MTLOriginMake(0, 0, 0)];
+        int32_t dr[4] = {(int32_t)x, (int32_t)y, (int32_t)(x + w), (int32_t)(y + h)}, sr[4] = {0, 0, (int32_t)w, (int32_t)h};
+        quad(r, p[0], dr, STAGE_SURF, sr, 0, 0);
+        return;
+    }
     if (s->level >= s->tex.mipmapLevelCount || (uint64_t)x + w > (s->tex.width >> s->level ?: 1) || (uint64_t)y + h > (s->tex.height >> s->level ?: 1)) return;
     if (!r->enc) maybe_commit(r);
     void *dst = ring_alloc(r, pitch * h, &off); memcpy(dst, p + 6, pitch * h);
@@ -220,7 +263,6 @@ static void surface_upload(DSRRenderer *r, const uint32_t *p, uint32_t size)
 }
 
 // ---------- quads (blits, fills) ----------
-static void quad(DSRRenderer *r, uint32_t dst, const int32_t *drect, uint32_t src, const int32_t *srect, int fill, uint32_t color);
 // The game composited its cursor over zeros (see surface.c): the pixels are premultiplied, alpha = coverage.
 static void upload_over(DSRRenderer *r, const uint32_t *p, uint32_t size)
 {
@@ -246,9 +288,10 @@ static void quad(DSRRenderer *r, uint32_t dst, const int32_t *drect, uint32_t sr
     q.mode[0] = fill == 1;
     id<MTLRenderCommandEncoder> e = enc_for(r, dst, 0); if (!e) return;
     [e setRenderPipelineState:fill == 2 ? r->quad_over_pso : r->quad_pso]; [e setDepthStencilState:r->nodepth_ds]; [e setCullMode:MTLCullModeNone];
-    [e setViewport:(MTLViewport){0, 0, d->w, d->h, 0, 1}];
+    [e setViewport:(MTLViewport){0, 0, d->w * d->sc, d->h * d->sc, 0, 1}];                   /* texture pixels (a scaled target: larger) */
     [e setVertexBytes:&q length:sizeof q atIndex:0]; [e setFragmentBytes:&q length:sizeof q atIndex:0];
-    [e setFragmentTexture:fill == 2 ? r->scratch : s ? tex2d(s) : r->dummy atIndex:0]; [e setFragmentSamplerState:r->point_clamp atIndex:0];
+    float ssc = fill == 2 || !s ? 1 : s->sc;                                                  /* scaled one way or the other: filtered */
+    [e setFragmentTexture:fill == 2 ? r->scratch : s ? tex2d(s) : r->dummy atIndex:0]; [e setFragmentSamplerState:ssc != d->sc ? r->linear_clamp : r->point_clamp atIndex:0];
     [e drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
     memset(&r->es, 0, sizeof r->es); r->es.cull = -1;   // the draw-state cache no longer matches the encoder
 }
@@ -379,6 +422,7 @@ static void draw(DSRRenderer *r, const uint32_t *p, uint32_t size)
                 into ? "draw into" : "add from", r->rt, t_ ? t_->w : 0, t_ ? t_->h : 0, fvf, nv, r->rs[28], r->rs[35], r->rs[140], r->rs[27], r->rs[19], r->rs[20], r->rs[168],
                 r->rs[7], r->rs[14], r->rs[60], r->tss[0][1], r->tss[0][2], r->tss[0][3], r->tss[0][4], r->tss[0][5], r->tss[0][6], r->tss[1][1], r->tss[1][4], r->tex[0]); } }
     Surf *rt = surf(r, r->rt), *ds = surf(r, r->ds); if (!rt) { dsr_stat[2]++; return; }
+    ds = depth_with(r, rt, ds);
     id<MTLRenderPipelineState> pso = pipeline_for(r, fvf, ds != NULL); if (!pso) { dsr_stat[3]++; return; }
     id<MTLRenderCommandEncoder> e = enc_for(r, r->rt, r->ds); if (!e) { dsr_stat[4]++; return; }
     void *vdst = ring_alloc(r, nv * stride, &voff); memcpy(vdst, p + 4, nv * stride);
@@ -406,7 +450,7 @@ static void draw(DSRRenderer *r, const uint32_t *p, uint32_t size)
     uint32_t cull = r->rs[22];
     int cm = cull == 2 ? MTLCullModeFront : cull == 3 ? MTLCullModeBack : MTLCullModeNone;   // D3DCULL_CW culls clockwise (= front here)
     if (r->es.cull != cm) { [e setCullMode:(MTLCullMode)cm]; r->es.cull = cm; }
-    MTLViewport vp = {r->vp[0], r->vp[1], u.vp[2], u.vp[3], r->vp[4], r->vp[5] ? r->vp[5] : 1};
+    MTLViewport vp = {r->vp[0] * rt->sc, r->vp[1] * rt->sc, u.vp[2] * rt->sc, u.vp[3] * rt->sc, r->vp[4], r->vp[5] ? r->vp[5] : 1};   /* u.vp stays in the game's units */
     if (memcmp(&vp, &r->es.vp, sizeof vp)) { [e setViewport:vp]; r->es.vp = vp; }
     if (!r->es.ring_bound) {
         [e setVertexBuffer:r->ring offset:voff atIndex:0]; [e setVertexBuffer:r->white offset:0 atIndex:2];
@@ -484,6 +528,7 @@ static void draw_prog(DSRRenderer *r, const uint32_t *p, uint32_t size)
     if (prim == 6 && (ni ? ni : nv) < 3) return;
     if (r->cur_prog >= 1024 || !r->prog[r->cur_prog].vs) return;
     Surf *rt = surf(r, r->rt), *ds = surf(r, r->ds); if (!rt) { dsr_stat[2]++; return; }
+    ds = depth_with(r, rt, ds);
     id<MTLRenderPipelineState> pso = prog_pipeline(r, mask, ds != NULL); if (!pso) { dsr_stat[3]++; return; }
     id<MTLRenderCommandEncoder> e = enc_for(r, r->rt, r->ds); if (!e) { dsr_stat[4]++; return; }
     void *vdst = ring_alloc(r, nv * stride, &voff); memcpy(vdst, p + 5, nv * stride);
@@ -505,7 +550,7 @@ static void draw_prog(DSRRenderer *r, const uint32_t *p, uint32_t size)
     [e setRenderPipelineState:pso]; [e setDepthStencilState:depth_for(r)];
     if (r->rs[52]) [e setStencilReferenceValue:r->rs[57] & 255];
     uint32_t cull = r->rs[22]; [e setCullMode:cull == 2 ? MTLCullModeFront : cull == 3 ? MTLCullModeBack : MTLCullModeNone];
-    [e setViewport:(MTLViewport){r->vp[0], r->vp[1], u.vp[2], u.vp[3], r->vp[4], r->vp[5] ? r->vp[5] : 1}];
+    [e setViewport:(MTLViewport){r->vp[0] * rt->sc, r->vp[1] * rt->sc, u.vp[2] * rt->sc, u.vp[3] * rt->sc, r->vp[4], r->vp[5] ? r->vp[5] : 1}];   /* u.vp stays in the game's units */
     [e setVertexBuffer:r->ring offset:voff atIndex:0]; [e setVertexBuffer:r->attr_defaults offset:0 atIndex:3];
     [e setVertexBytes:&u length:sizeof u atIndex:1]; [e setFragmentBytes:&u length:sizeof u atIndex:1];
     uint32_t nc = r->npconst ? r->npconst : 1, coff;
@@ -552,7 +597,8 @@ static void clear_rect(DSRRenderer *r, uint32_t flags, uint32_t color, float z, 
         id<MTLRenderCommandEncoder> e = enc_for(r, r->rt, r->ds); float zz[4] = {z, 0, 0, 0};
         [e setRenderPipelineState:r->zclear_pso]; [e setDepthStencilState:r->zsclear_ds[(flags >> 1) & 3]]; [e setCullMode:MTLCullModeNone];
         if (flags & 4) [e setStencilReferenceValue:stencil & 255];
-        [e setViewport:(MTLViewport){rc[0], rc[1], rc[2] - rc[0], rc[3] - rc[1], 0, 1}];
+        float sc = surf(r, r->rt)->sc;
+        [e setViewport:(MTLViewport){rc[0] * sc, rc[1] * sc, (rc[2] - rc[0]) * sc, (rc[3] - rc[1]) * sc, 0, 1}];
         [e setVertexBytes:zz length:16 atIndex:0]; [e drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
         memset(&r->es, 0, sizeof r->es); r->es.cull = -1;
     }
@@ -562,6 +608,7 @@ static void clear(DSRRenderer *r, const uint32_t *p, uint32_t size)
 {
     uint32_t flags = p[0], color = p[1]; float z; memcpy(&z, &p[2], 4);
     Surf *rt = surf(r, r->rt), *ds = surf(r, r->ds); if (!rt) return;
+    ds = depth_with(r, rt, ds);
     if (dsr_verbose) fprintf(stderr, "clear flags %x color %08x rt %u (%ux%u fmt %u usage %lx) ds %u vp %.0f %.0f %.0f %.0f\n", flags, color, r->rt, rt->w, rt->h, rt->fmt, (unsigned long)rt->tex.usage, r->ds, r->vp[0], r->vp[1], r->vp[2], r->vp[3]);
     int32_t full[4] = {(int32_t)r->vp[0], (int32_t)r->vp[1], (int32_t)(r->vp[0] + (r->vp[2] ? r->vp[2] : rt->w)), (int32_t)(r->vp[1] + (r->vp[3] ? r->vp[3] : rt->h))};
     full[0] = full[0] > 0 ? full[0] : 0; full[1] = full[1] > 0 ? full[1] : 0;
@@ -609,7 +656,7 @@ id<MTLCommandBuffer> dsr_renderer_present_to(DSRRenderer *r, id<MTLTexture> dst)
     id<MTLRenderCommandEncoder> e = [cmdbuf(r) renderCommandEncoderWithDescriptor:p];
     [e setRenderPipelineState:r->present_pso];
     [e setFragmentTexture:s->tex atIndex:0]; [e setFragmentTexture:r->gamma_lut atIndex:1];
-    [e setFragmentSamplerState:(dst.width == s->w && dst.height == s->h) ? r->point_clamp : r->linear_clamp atIndex:0];
+    [e setFragmentSamplerState:(dst.width == s->tex.width && dst.height == s->tex.height) ? r->point_clamp : r->linear_clamp atIndex:0];
     [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
     if (r->g_on) {   // frame-time graph, bottom-left: 240 columns, 0..40 ms
         if (!r->graph_pso) {
@@ -640,6 +687,18 @@ void dsr_renderer_set_readback(DSRRenderer *r, void *area, size_t size, volatile
 static void readback(DSRRenderer *r, const uint32_t *p)
 {
     Surf *s = surf(r, p[0]); uint32_t x = p[1], y = p[2], w = p[3], h = p[4]; int ok = 0;
+    if (s && s->sc != 1 && r->rb_buf && s->fmt != 3 && w && h && (uint64_t)x + w <= s->w && (uint64_t)y + h <= s->h && (uint64_t)w * h * 4 <= r->rb_buf.length) {
+        /* a scaled surface, read at the game's size: drawn smaller into the stage, then read from there */
+        Surf *g = stage(r, w, h);
+        int32_t dr[4] = {0, 0, (int32_t)w, (int32_t)h}, sr[4] = {(int32_t)x, (int32_t)y, (int32_t)(x + w), (int32_t)(y + h)};
+        quad(r, STAGE_SURF, dr, p[0], sr, 0, 0);
+        if (r->enc) { [r->enc endEncoding]; r->enc = nil; }
+        [blit_enc(r) copyFromTexture:g->tex sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(w, h, 1)
+                             toBuffer:r->rb_buf destinationOffset:0 destinationBytesPerRow:w * 4 destinationBytesPerImage:w * h * 4];
+        dsr_renderer_flush(r, 1);
+        if (r->rb_done) __atomic_store_n(r->rb_done, p[5], __ATOMIC_RELEASE);
+        return;
+    }
     if (s && r->rb_buf && s->fmt != 3 && w && h && (uint64_t)x + w <= s->w && (uint64_t)y + h <= s->h && (uint64_t)w * h * 4 <= r->rb_buf.length) {
         if (r->enc) { [r->enc endEncoding]; r->enc = nil; }
         [blit_enc(r) copyFromTexture:s->tex sourceSlice:s->slice sourceLevel:s->level sourceOrigin:MTLOriginMake(x, y, 0) sourceSize:MTLSizeMake(w, h, 1)
@@ -650,7 +709,7 @@ static void readback(DSRRenderer *r, const uint32_t *p)
 }
 double dsr_renderer_present_time(DSRRenderer *r) { return r->present_ts; }
 void dsr_renderer_set_graph(DSRRenderer *r, const float *a, int ha, const float *b, int hb) { r->g_a = a; r->g_ha = ha; r->g_b = b; r->g_hb = hb; r->g_on = 1; }
-void dsr_renderer_presented_size(DSRRenderer *r, uint32_t *w, uint32_t *h) { Surf *s = surf(r, r->presented); *w = s ? s->w : 0; *h = s ? s->h : 0; }
+void dsr_renderer_presented_size(DSRRenderer *r, uint32_t *w, uint32_t *h) { Surf *s = surf(r, r->presented); *w = s ? (uint32_t)lroundf(s->w * s->sc) : 0; *h = s ? (uint32_t)lroundf(s->h * s->sc) : 0; }
 id<MTLTexture> dsr_renderer_rt(DSRRenderer *r) { Surf *s = surf(r, r->rt); return s ? s->tex : nil; }
 id<MTLTexture> dsr_renderer_presented(DSRRenderer *r) { Surf *s = surf(r, r->presented); return s ? s->tex : nil; }
 
@@ -690,6 +749,7 @@ int dsr_renderer_exec(DSRRenderer *r, uint32_t op, const uint8_t *pl, uint32_t s
     case DSR_PROG_USE: r->cur_prog = p[0] < 1024 ? p[0] : 0; break;
     case DSR_PROG_CONST: if (size >= 4 && p[0] <= 4096 && 4 + 16 * (uint64_t)p[0] <= size) { memcpy(r->pconst, p + 1, 16 * (size_t)p[0]); r->npconst = p[0]; } break;
     case DSR_DRAW_PROG: draw_prog(r, p, size); break;
+    case DSR_MODE: r->mode_w = p[0]; r->mode_h = p[1]; break;
     case DSR_GAMMA: if (size >= 1536) { memcpy(r->gamma, p, 1536); r->gamma_dirty = 1; } break;
     default: break;
     }
