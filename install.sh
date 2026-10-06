@@ -1,8 +1,9 @@
 #!/bin/bash
 # install.sh --game-dir <Dungeon Siege II folder> [--app-dir DIR] [--data-dir DIR]
 # install.sh --gog-installer <setup_dungeon_siege_2_*.exe>   (GOG offline installer; needs: brew install innoextract)
-# install.sh --cd-key                  multiplayer: asks for the product key of your own retail copy (25 characters, on the
-#                                      disc case) and stores what the retail installer would have derived from it (the
+# install.sh --cd-key                  multiplayer: asks for the product key of your own original retail copy (25
+#                                      characters, on the sticker under disc 1; the Steam and GOG releases come without
+#                                      one) and stores what the retail installer would have derived from it (the
 #                                      "DoubleHash" the game presents to the GameSpy/OpenSpy lobby) in the data folder.
 #                                      The key itself is not stored. Without it, multiplayer stops at "Could not find a
 #                                      valid CDKey". DS2_CDKEY=<key> gives it without the prompt. The launch window
@@ -192,7 +193,8 @@ codesign --force --deep --sign - "$A" >/dev/null 2>&1 || true
 echo "== done: $A (data in $DATA)"
 # online play needs the player's own CD key: offered once, on an interactive install (not by the launcher's updater)
 if [ ! -f "$DATA/cdkey-hash.txt" ] && [ -t 0 ] && [ -z "$AS_NIGHTLY$CDKEY" ]; then
-  echo "== Online play needs your own Dungeon Siege II CD key (25 characters, on the disc case). Press Return to skip;"
+  echo "== Online play needs the CD key of an original retail copy (25 characters, on the sticker under disc 1; Steam"
+  echo "   and GOG copies have none). Press Return to skip;"
   echo "   you can add it later in the launch window (Online) or with ./install.sh --cd-key."
   K="$(ask_cdkey 'Product key: ')"
   [ -n "$K" ] && { store_cdkey "$K" "$DATA/cdkey-hash.txt" || echo "   (not stored; try again from the launch window)"; }

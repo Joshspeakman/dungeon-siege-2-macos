@@ -332,7 +332,8 @@ static BOOL cdkey_panel(NSString *data)
     for (NSString *problem = nil;;) {
         NSAlert *a = [NSAlert new];
         a.messageText = problem ?: @"Your Dungeon Siege II CD Key";
-        a.informativeText = @"The 25-character product key of your own copy (on the disc case or in your store account), for online play. "
+        a.informativeText = @"The 25-character product key of your own original retail copy (the sticker under disc 1 in the box), for online play. "
+                             "The Steam and GOG releases come without one. "
                              "Each copy needs its own key: the same key can't be online twice at once. Only a hash of it is kept on this Mac.";
         NSSecureTextField *f = [[NSSecureTextField alloc] initWithFrame:NSMakeRect(0, 0, 320, 24)];
         f.placeholderString = @"XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"; a.accessoryView = f;

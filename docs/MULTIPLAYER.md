@@ -14,10 +14,14 @@ online service the game was built on (shut down in 2014).
 
 ## Your CD key
 
-The online lobby needs a CD key: the 25-character product key of **your own copy** (on the disc case of the retail
-game, or in your store account). The game doesn't read the key itself but a hash of it that the retail installer
-used to write; download releases never ran that installer, so the port computes the same hash from your key. Only
-that hash is stored, never the key.
+The online lobby needs a CD key: the 25-character product key of an **original retail copy** of Dungeon Siege II (the
+sticker under disc 1 in the box). The game doesn't read the key itself but a hash of it that the retail installer used
+to write; the port computes the same hash from your key. Only that hash is stored, never the key.
+
+**The Steam and GOG releases come without a CD key.** Both sell Dungeon Siege II as a single-player game (GameSpy had
+shut down) and give out no in-game key; the keys sold for them are store activation codes, which the game doesn't
+accept. Single-player is unaffected. For now, online play needs an original retail key; this port doesn't work around
+the key check. A key for every buyer would have to come from the rights holder.
 
 **Each copy needs its own key.** The same key can't be in the lobby from two computers at once, as with GameSpy.
 
