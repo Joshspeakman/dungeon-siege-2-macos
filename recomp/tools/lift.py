@@ -18,7 +18,9 @@ CC = {'o': 'CC_O', 'no': 'CC_NO', 'b': 'CC_B', 'ae': 'CC_AE', 'e': 'CC_E', 'ne':
       's': 'CC_S', 'ns': 'CC_NS', 'p': 'CC_P', 'np': 'CC_NP', 'l': 'CC_L', 'ge': 'CC_GE', 'le': 'CC_LE', 'g': 'CC_G'}
 # Points where the native build adds behaviour (runtime/win32/hooks.c). Each is an instruction boundary; the hook sees
 # the registers and memory as the original code would, and does nothing unless its feature is turned on.
-HOOKS = {                 # address: description (runtime/win32/hooks.c rt_hook); none yet for Dungeon Siege II
+HOOKS = {                 # address: description (runtime/win32/hooks.c rt_hook)
+    0x00544df0: 'vertex lighting of a directional light: the loop done natively (native.c)',
+    0x00544ee5: 'after that loop: DS2_NATIVE_CHECK compares the native result with the original',
 }
 JUNK = {'in', 'out', 'insb', 'insd', 'insw', 'outsb', 'outsd', 'outsw', 'iretd', 'hlt', 'cli', 'sti', 'int1', 'into',
         'int', 'aaa', 'aas', 'aam', 'aad', 'daa', 'das', 'salc', 'les', 'lds', 'retf', 'ljmp', 'lcall', 'arpl', 'bound',
