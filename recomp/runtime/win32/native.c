@@ -110,6 +110,60 @@ static void light_dir_check(Ctx *c)
     if (runs % 20000 == 0) fprintf(stderr, "native: light loop checked %ld runs, %ld differ\n", runs, bad);
 }
 
+/* 0x67aeb6 (thiscall, ecx: a 3x3 matrix, rows of 3 floats; out, in): out = (in . row0, in . row1, in . row2), the
+ * transform of the terrain's vertices (about a seventh of the game thread, called for every vertex). The x87 order:
+ * out0 = (v1 m1 + v0 m0) + v2 m2, out1 = (v1 m4 + v0 m3) + v2 m5, out2 = v2 m8 + (v1 m7 + v0 m6), each product and sum
+ * rounded by precision control, then stored as floats. */
+void f_0067aeb6(Ctx *c);                                 /* the recompiled original (check mode) */
+static int mat3_bypass; static long mat3_runs, mat3_bad;
+static int mat3_apply(Ctx *c)
+{
+    if (mat3_bypass) return 0;
+    const uint8_t *M = G_MEM; uint32_t m = c->ecx, out = rt_r32(M, c->esp + 4), in = rt_r32(M, c->esp + 8), fcw = c->fcw;
+    float v0 = rt_rf32(M, in), v1 = rt_rf32(M, in + 4), v2 = rt_rf32(M, in + 8), r[3];
+    float m0 = rt_rf32(M, m), m1 = rt_rf32(M, m + 4), m2 = rt_rf32(M, m + 8), m3 = rt_rf32(M, m + 12), m4 = rt_rf32(M, m + 16),
+          m5 = rt_rf32(M, m + 20), m6 = rt_rf32(M, m + 24), m7 = rt_rf32(M, m + 28), m8 = rt_rf32(M, m + 32);
+    int done = 0;
+    if ((fcw & 0x300u) == 0) {                          /* float arithmetic where it rounds exactly as the x87 (see above) */
+        #define OKF(x) ((x) == 0.0f || (__builtin_fabsf(x) >= 1.17549435e-38f && __builtin_fabsf(x) <= 3.40282347e+38f))
+        float a = v0 * m0, b = v1 * m1, cc = v2 * m2, d = v0 * m3, e = v1 * m4, f = v2 * m5, g = v0 * m6, h = v1 * m7, i = v2 * m8;
+        float ab = b + a, x = ab + cc, de = e + d, y = de + f, gh = h + g, z = i + gh;
+        if (OKF(a) && OKF(b) && OKF(cc) && OKF(d) && OKF(e) && OKF(f) && OKF(g) && OKF(h) && OKF(i) && OKF(ab) && OKF(x) && OKF(de) && OKF(y) && OKF(gh) && OKF(z)) {
+            r[0] = x; r[1] = y; r[2] = z; done = 1;
+        }
+        #undef OKF
+    }
+    if (!done) {
+        #define P(e) rt_pc(fcw, (e))
+        double a = P((double)v0 * m0), b = P((double)v1 * m1), cc = P((double)v2 * m2), d = P((double)v0 * m3), e = P((double)v1 * m4),
+               f = P((double)v2 * m5), g = P((double)v0 * m6), h = P((double)v1 * m7), i = P((double)v2 * m8);
+        r[0] = rt_f32(fcw, P(P(b + a) + cc)); r[1] = rt_f32(fcw, P(P(e + d) + f)); r[2] = rt_f32(fcw, P(i + P(h + g)));
+        #undef P
+    }
+    if (native_check()) {                               /* run the original here and compare with its result */
+        mat3_bypass = 1; f_0067aeb6(c); mat3_bypass = 0; mat3_runs++;
+        if (rt_rf32(M, out) != r[0] || rt_rf32(M, out + 4) != r[1] || rt_rf32(M, out + 8) != r[2]) {
+            if (mat3_bad++ < 20) fprintf(stderr, "native: matrix differs: original %.9g %.9g %.9g, native %.9g %.9g %.9g\n",
+                                         rt_rf32(M, out), rt_rf32(M, out + 4), rt_rf32(M, out + 8), r[0], r[1], r[2]);
+        }
+        if (mat3_runs % 1000000 == 0) fprintf(stderr, "native: matrix checked %ld calls, %ld differ\n", mat3_runs, mat3_bad);
+        return 1;                                       /* the original did the call */
+    }
+    rt_wf32(G_MEM, out, r[0]); rt_wf32(G_MEM, out + 4, r[1]); rt_wf32(G_MEM, out + 8, r[2]);
+    c->eax = in; c->edx = m;                            /* as the original leaves them (ebx is kept; ecx unchanged) */
+    c->esp += 12;                                       /* ret 8 */
+    return 1;
+}
+
+int native_override(Ctx *c, uint32_t addr)
+{
+    if (!native_on()) return 0;
+    switch (addr) {
+    case 0x0067aeb6u: return mat3_apply(c);
+    }
+    return 0;
+}
+
 int native_hook(Ctx *c, uint32_t addr)
 {
     if (!native_on()) return 0;

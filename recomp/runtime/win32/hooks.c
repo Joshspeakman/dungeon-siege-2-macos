@@ -50,8 +50,8 @@ void rt_hook(Ctx *c, uint32_t addr)
     }
 }
 
+int native_override(Ctx *c, uint32_t addr);   /* native.c */
 int rt_override(Ctx *c, uint32_t addr)
 {
-    (void)c; (void)addr;
-    return 0;
+    return native_override(c, addr);
 }
