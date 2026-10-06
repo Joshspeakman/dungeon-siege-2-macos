@@ -32,8 +32,10 @@ __attribute__((unused)) static void guest_format(char *out, size_t cap, uint32_t
     }
     out[n] = 0;
 }
+int native_hook(Ctx *c, uint32_t addr);   /* native.c */
 void rt_hook(Ctx *c, uint32_t addr)
 {
+    if (native_hook(c, addr)) return;
     switch (addr) {
     default:   /* development trace hooks (tools/lift.py DS_TRACE_HOOKS) */
         if (getenv("DS_HOOKTRACE")) fprintf(stderr, "hook %08x: eax %08x ecx %08x edx %08x ebx %08x esi %08x edi %08x | ret %08x args %08x %08x %08x %08x\n",
