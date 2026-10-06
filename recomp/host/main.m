@@ -382,19 +382,15 @@ static void window_changed(uint32_t hwnd, int x, int y, int w, int h, int visibl
     });
 }
 
-/* The game's resolution lives in DungeonSiege.ini (width/height at the top, before any [section]). With none set, use
- * this screen's size (in points); DS_RESOLUTION=WxH sets it explicitly. The 800x600 front-end
- * menus are fixed by the game and shown with bars at the sides. */
+/* The game's resolution lives in DungeonSiege2.ini (width/height at the top, before any [section]). With none set, use
+ * this screen's size (in points); DS_RESOLUTION=WxH sets it explicitly. Test runs keep the game's own default unless
+ * DS_RESOLUTION is given. */
 static void ensure_resolution(const char *drive_c)
 {
     char dir[1200], path[1300];
-    const char *exp = getenv("DS_EXPANSION");      /* Legends of Aranna has its own settings and saves (runtime/win32/core.c) */
-    snprintf(dir, sizeof dir, "%s/Users/player/Documents/Dungeon Siege%s", drive_c, exp && *exp ? " LOA" : "");
-    if (exp && *exp) {                             /* this port's earlier place for the expansion's folder: moved once */
-        char old[1300]; snprintf(old, sizeof old, "%s/Users/player/Documents/Legends of Aranna/Dungeon Siege", drive_c);
-        struct stat st; if (!stat(old, &st) && stat(dir, &st)) { rename(old, dir); *strrchr(old, '/') = 0; rmdir(old); }
-    }
-    snprintf(path, sizeof path, "%s/DungeonSiege.ini", dir);
+    snprintf(dir, sizeof dir, "%s/Users/player/Documents/My Games/Dungeon Siege 2", drive_c);
+    snprintf(path, sizeof path, "%s/DungeonSiege2.ini", dir);
+    if (getenv("DS_TEST") && !getenv("DS_RESOLUTION")) return;
     int w = w32_screen_w, h = w32_screen_h, force = 0;
     const char *r = getenv("DS_RESOLUTION");
     if (r && sscanf(r, "%dx%d", &w, &h) == 2 && w >= 640 && h >= 480) force = 1; else { w = w32_screen_w; h = w32_screen_h; }
@@ -507,7 +503,7 @@ int main(int argc, char **argv)
             else if (!strcmp(argv[k], "--game")) game = argv[k + 1];
             else if (!strcmp(argv[k], "--data")) data = argv[k + 1];
         }
-        if (!exe || !game || !data) { fprintf(stderr, "usage: DungeonSiegeNative --exe <DungeonSiege.exe> --game <game folder> --data <data folder>\n"); return 1; }
+        if (!exe || !game || !data) { fprintf(stderr, "usage: DungeonSiegeNative --exe <DungeonSiege2.exe> --game <game folder> --data <data folder>\n"); return 1; }
         NSString *bin = [[NSString stringWithUTF8String:argv[0]] stringByDeletingLastPathComponent];
         snprintf(dsr_snapshot_path, sizeof dsr_snapshot_path, "%s/dsr_snapshot.bin", bin.UTF8String);
         char drive_c[1024], overlay[1024];
@@ -516,18 +512,12 @@ int main(int argc, char **argv)
         NSRect sf = NSScreen.mainScreen.frame; w32_screen_w = (int)sf.size.width; w32_screen_h = (int)sf.size.height;
         w32_screen_scale = NSScreen.mainScreen.backingScaleFactor;
         init_keymap();
-        {   /* the launch window (resolution, view distance, frame rate) unless in test mode */
+        {   /* the launch window (resolution, frame rate, updates) unless in test mode */
             int ds_launcher_run(const char *game_dir, const char *data_dir);
             if (!getenv("DS_TEST") || getenv("DS_LAUNCHER_SHOT")) {
                 [NSApplication sharedApplication]; [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
                 if (!ds_launcher_run(game, data)) return 0;
             }
-            void ds_mods_sync(const char *data_dir); ds_mods_sync(data);   /* the ticked mods into the game's folders */
-        }
-        {   /* draw distance in percent of the original (the launch window sets it); hides an installed SeeFar mod */
-            extern float w32_draw_distance; extern int w32_hide_seefar; const char *dd = getenv("DS_DRAW_DISTANCE");
-            if (dd && atof(dd) > 100.5) { w32_draw_distance = (float)(atof(dd) / 100.0); w32_hide_seefar = 1;
-                fprintf(stderr, "DungeonSiegeNative: draw distance %.0f%% (an installed SeeFar mod is ignored)\n", atof(dd)); }
         }
         w32_crash_init(data, DS_BUILD); w32_crash_thread("macOS UI thread");
         NSSetUncaughtExceptionHandler(on_objc_exception);
@@ -538,7 +528,7 @@ int main(int argc, char **argv)
         [NSApplication sharedApplication]; [NSApp setActivationPolicy:test_mode ? NSApplicationActivationPolicyAccessory : NSApplicationActivationPolicyRegular];
         AppDelegate *del = [AppDelegate new]; NSApp.delegate = del;
         NSMenu *bar = [NSMenu new], *appm = [NSMenu new]; NSMenuItem *it = [NSMenuItem new]; it.submenu = appm; [bar addItem:it];
-        [appm addItemWithTitle:@"Quit Dungeon Siege" action:@selector(terminate:) keyEquivalent:@"q"]; NSApp.mainMenu = bar;
+        [appm addItemWithTitle:@"Quit Dungeon Siege II" action:@selector(terminate:) keyEquivalent:@"q"]; NSApp.mainMenu = bar;
 
         layer = [CAMetalLayer layer]; layer.device = MTLCreateSystemDefaultDevice(); layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
         layer.framebufferOnly = YES; layer.opaque = YES; layer.contentsGravity = kCAGravityResizeAspect; layer.maximumDrawableCount = 3;
