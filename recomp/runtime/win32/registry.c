@@ -29,6 +29,28 @@ static RKey *lookup(const char *path, int create)
     RKey *k = calloc(1, sizeof *k); snprintf(k->path, sizeof k->path, "%s", path); keys[nkeys++] = k;
     return k;
 }
+/* a string value put in place before the game looks (install-time values; W32_REGISTRY="key|name|value;..." in tests) */
+void w32_reg_string(const char *path, const char *name, const char *str)
+{
+    char p[512]; snprintf(p, sizeof p, "%s", path);
+    for (char *q = p; *q; q++) { if (*q >= 'A' && *q <= 'Z') *q += 32; if (*q == '/') *q = '\\'; }
+    pthread_mutex_lock(&rlock);
+    RKey *k = lookup(p, 1);
+    if (k) {
+        RVal *v = 0; for (int j = 0; j < k->nv; j++) if (!strcasecmp(k->v[j].name, name)) v = &k->v[j];
+        if (!v) { k->v = realloc(k->v, (size_t)(k->nv + 1) * sizeof *k->v); v = &k->v[k->nv++]; memset(v, 0, sizeof *v); snprintf(v->name, sizeof v->name, "%s", name); }
+        free(v->data); v->type = 1; v->size = (uint32_t)strlen(str) + 1; v->data = (uint8_t *)strdup(str);   /* REG_SZ */
+    }
+    pthread_mutex_unlock(&rlock);
+}
+static void reg_seed(void)
+{
+    static int done; if (done) return; done = 1;
+    const char *e = getenv("W32_REGISTRY"); if (!e || !getenv("DS_TEST")) return;
+    char *s = strdup(e), *save, *t = strtok_r(s, ";", &save);
+    for (; t; t = strtok_r(0, ";", &save)) { char *a = strchr(t, '|'), *b = a ? strchr(a + 1, '|') : 0; if (!b) continue; *a = *b = 0; w32_reg_string(t, a + 1, b + 1); }
+    free(s);
+}
 #define HREG_BASE 0x00a00000u
 static RKey *rh[256];
 static RKey *key_of(uint32_t h) { uint32_t i = (h - HREG_BASE) / 4; return (h >= HREG_BASE && i < 256) ? rh[i] : 0; }
@@ -37,11 +59,12 @@ static uint32_t new_handle(RKey *k) { for (int i = 1; i < 256; i++) if (!rh[i]) 
 IMPL(advapi32, RegOpenKeyExA)
 {
     char p[1024]; uint32_t out = ARG(4);
+    reg_seed();
     pthread_mutex_lock(&rlock);
     RKey *k = full_path(ARG(0), ARG(1) ? GS(ARG(1)) : "", p, sizeof p) ? 0 : lookup(p, 0);
     uint32_t h = k ? new_handle(k) : 0;
     pthread_mutex_unlock(&rlock);
-    if (!k) RET(2, 5);                                          /* ERROR_FILE_NOT_FOUND */
+    if (!k) { if (getenv("W32_REGLOG")) fprintf(stderr, "w32: registry key %s not found\n", p); RET(2, 5); }   /* ERROR_FILE_NOT_FOUND */
     rt_w32(G_MEM, out, h); RET(0, 5);
 }
 IMPL(advapi32, RegCreateKeyExA)

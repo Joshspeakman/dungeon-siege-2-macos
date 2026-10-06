@@ -29,7 +29,8 @@ committed.
 | 5 | Analysis coverage: 97.1%; 73 jump tables still bounded heuristically | as in DS1. |
 | 6 | Text rendering (GDI glyphs), Winsock, audio check, movies | |
 | 7 | Launcher, installer, updater, app bundle (from DS1) | |
-| 8 | Multiplayer (LAN / direct IP; GameSpy is gone), performance, hardening | |
+| 8 | Multiplayer | **Disabled by the game itself in this build**: `UIFrontend::TransitionToMain` (0x44c2d3) always calls `UIButton::DisableButton` on `button_multiplayer` (and `main_menu.gas` calls a misspelled `SelectMultiPlayer$`). Its network layer is DirectPlay 8 (DS1's `dpnet.c`/`dp8proto.c` would carry over) over Winsock. Re-enabling it changes the game's behaviour: the user's decision. |
+| 9 | Performance, hardening | 60 fps at the display's resolution with 2-3.5 ms GPU; a 6-minute random-input soak is clean. |
 
 ## Running a development build
 
