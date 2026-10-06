@@ -3,12 +3,29 @@
  *              continues;
  *   OVERRIDES: at a function's first instruction; return 1 when the whole call (including the return) was done here,
  *              0 to run the original.
- * Dungeon Siege II has none yet; the DS1 port's hooks (draw distance, Skrit messages, shadows, paper doll, expansion)
- * are the model for the ones it will need. */
+ * The DS1 port's hooks (draw distance, Skrit messages, shadows, paper doll, expansion) are the model for these. */
 #include "w32.h"
 #include "ext.h"
 
-float w32_draw_distance = 1.0f;          /* DS_DRAW_DISTANCE (main.m); not applied to DS2 yet */
+static float gf(uint32_t a) { float v; uint32_t u = rt_r32(G_MEM, a); memcpy(&v, &u, 4); return v; }
+static void sf(uint32_t a, float v) { uint32_t u; memcpy(&u, &v, 4); rt_w32(G_MEM, a, u); }
+
+/* View distance (DS_DRAW_DISTANCE, percent; the launcher's View Distance): each area's mood limits how far the world
+ * is seen with its fog (near, far and the low-detail pair) and, in some, a frustum (width: the field of view; height
+ * and depth: distances). The mood reader (0x909d.., MoodSetting from gas) has just read both blocks into its locals;
+ * the distances are scaled before they are stored, like the SeeFar mod's longer fog. Moods without a frustum use the
+ * world's (100000 deep), so only their fog is moved out. */
+static void mood_read(Ctx *c)
+{
+    static float f = -1; if (f < 0) { const char *e = getenv("DS_DRAW_DISTANCE"); f = e && atof(e) > 100.5 ? (float)(atof(e) / 100.0) : 1.0f; }
+    uint32_t bp = c->ebp;
+    if (getenv("DS_HOOKLOG")) fprintf(stderr, "hook: mood frustum %d %.1f/%.1f/%.1f fog %d %.1f..%.1f low %.1f..%.1f (x%.2f)\n", G_MEM[bp - 0x184],
+                                      gf(bp - 0x180), gf(bp - 0x17c), gf(bp - 0x178), G_MEM[bp - 0x174], gf(bp - 0x170), gf(bp - 0x16c),
+                                      gf(bp - 0x168), gf(bp - 0x164), f);
+    if (f <= 1.001f) return;
+    if (G_MEM[bp - 0x184]) { sf(bp - 0x17c, gf(bp - 0x17c) * f); sf(bp - 0x178, gf(bp - 0x178) * f); }
+    if (G_MEM[bp - 0x174]) for (uint32_t o = 0x170; o >= 0x164; o -= 4) sf(bp - o, gf(bp - o) * f);
+}
 
 int vm_committed(uint32_t addr, uint32_t size);
 static int readable(uint32_t p) { return p >= 0x10000 && vm_committed(p, 1); }
@@ -36,6 +53,7 @@ __attribute__((unused)) static void guest_format(char *out, size_t cap, uint32_t
 void rt_hook(Ctx *c, uint32_t addr)
 {
     switch (addr) {
+    case 0x0090a076u: mood_read(c); break;
     default:   /* development trace hooks (tools/lift.py DS_TRACE_HOOKS) */
         if (getenv("DS_HOOKTRACE")) fprintf(stderr, "hook %08x: eax %08x ecx %08x edx %08x ebx %08x esi %08x edi %08x | ret %08x args %08x %08x %08x %08x\n",
                                             addr, c->eax, c->ecx, c->edx, c->ebx, c->esi, c->edi, rt_r32(G_MEM, c->esp), rt_r32(G_MEM, c->esp + 4),
