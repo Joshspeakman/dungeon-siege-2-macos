@@ -31,9 +31,10 @@ Test mode: `DS_TEST=1` (background window, no mouse capture, no launch window), 
 `W32_REGLOG=1` (registry keys not found), `W32_AUDIOLOG=1`. Crash and hang reports go to `<data>/CrashReports`.
 
 Native hot loops (`runtime/win32/native.c`, entered through `tools/lift.py` HOOKS and OVERRIDES): the vertex lighting
-of directional lights and the terrain's 3x3 vertex transform, bit-identical to the original. `DS2_NATIVE=0` runs the recompiled original instead, `DS2_NATIVE_CHECK=1` runs
-both and reports any difference, `DS2_NATIVE_PROF=1` prints the loop's time. `DSR_CAPLOG=1` prints the game's work per
-frame that the automatic frame cadence (120/60) is chosen from.
+of directional lights and the terrain's 3x3 vertex transform, bit-identical to the original. `DS2_NATIVE=0` runs the
+recompiled original instead, `DS2_NATIVE_CHECK=1` runs both and reports any difference, `DS2_NATIVE_PROF=1` prints
+the lighting loop's time. `DSR_CAPLOG=1` prints the game's work per frame that the automatic frame cadence (120/60) is
+chosen from.
 
 ## Execution model
 
