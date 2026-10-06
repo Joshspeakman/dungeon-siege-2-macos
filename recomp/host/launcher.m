@@ -285,6 +285,15 @@ static NSArray<NSDictionary *> *resolution_choices(void)
     for (size_t k = 0; k < sizeof std / sizeof *std; k++) if (std[k][0] <= W && std[k][1] <= H) add(std[k][0], std[k][1], @"Scaled to fill the screen");
     return a;
 }
+static NSArray<NSDictionary *> *distance_choices(void)
+{
+    return @[@{@"value": @"100", @"label": @"Original", @"note": @"As the game shipped"},
+             @{@"value": @"125", @"label": @"Far", @"note": @"125% of the original"},
+             @{@"value": @"150", @"label": @"Farther", @"note": @"150%, like the SeeFar mods"},
+             @{@"value": @"200", @"label": @"Very Far", @"note": @"200% of the original"},
+             @{@"value": @"250", @"label": @"Horizon", @"note": @"250%; heavier in large outdoor areas"},
+             @{@"value": @"300", @"label": @"Maximum", @"note": @"300%; may slow down in the biggest vistas"}];
+}
 static NSArray<NSDictionary *> *framerate_choices(void)
 {
     NSInteger hz = NSScreen.mainScreen.maximumFramesPerSecond; if (hz <= 0) hz = 60;
@@ -358,9 +367,10 @@ static NSInteger index_of(NSArray<NSDictionary *> *c, NSString *v, NSInteger dfl
     return dflt;
 }
 /* the chosen settings as environment for the runtime (read later at start-up) */
-static void apply(NSString *res, NSString *fps)
+static void apply(NSString *res, NSString *dist, NSString *fps)
 {
     setenv("DS_RESOLUTION", res.UTF8String, 1);
+    setenv("DS_DRAW_DISTANCE", dist.UTF8String, 1);
     if ([fps isEqualToString:@"unlimited"]) { setenv("DSR_FPSCAP", "0", 1); setenv("DSR_VSYNC", "0", 1); }
     else setenv("DSR_FPSCAP", fps.UTF8String, 1);
 }
@@ -476,12 +486,13 @@ int ds_launcher_run(const char *game_dir, const char *data_dir)
 {
     NSString *data = @(data_dir), *plistPath = [data stringByAppendingPathComponent:@"launcher.plist"];
     NSDictionary *saved = [NSDictionary dictionaryWithContentsOfFile:plistPath] ?: @{};
-    DSRow *res = [DSRow new], *fps = [DSRow new];
+    DSRow *res = [DSRow new], *dist = [DSRow new], *fps = [DSRow new];
     res.title = @"Resolution"; res.choices = resolution_choices(); res.index = index_of(res.choices, saved[@"resolution"], 0);
+    dist.title = @"View Distance"; dist.choices = distance_choices(); dist.index = index_of(dist.choices, saved[@"viewDistance"], 0);
     fps.title = @"Frame Rate"; fps.choices = framerate_choices(); fps.index = index_of(fps.choices, saved[@"frameRate"], 0);
     const char *shot = getenv("DS_LAUNCHER_SHOT");
     if (getenv("DS_NO_LAUNCHER") && !shot) {
-        if (saved.count) apply(res.choices[res.index][@"value"], fps.choices[fps.index][@"value"]);
+        if (saved.count) apply(res.choices[res.index][@"value"], dist.choices[dist.index][@"value"], fps.choices[fps.index][@"value"]);
         return 1;
     }
 
@@ -495,7 +506,7 @@ int ds_launcher_run(const char *game_dir, const char *data_dir)
     DSRow *online = [DSRow new]; online.title = @"Online"; online.choices = cdkey_choice(data);
     __weak DSRow *wo = online;
     online.activate = ^{ if (cdkey_panel(data)) wo.choices = cdkey_choice(data); };
-    NSArray<DSRow *> *rows = @[res, fps, online, upd];
+    NSArray<DSRow *> *rows = @[res, dist, fps, online, upd];
     DSLaunchView *v = [[DSLaunchView alloc] initWithFrame:NSMakeRect(0, 0, 780, 700 + 74 * (NSInteger)(rows.count - 5))];
     v.rows = rows; v.hover = v.pressed = HIT_NONE;
     __weak DSLaunchView *wv = v; __weak DSRow *wu = upd;
@@ -565,7 +576,8 @@ int ds_launcher_run(const char *game_dir, const char *data_dir)
     [w orderOut:nil];
     if (!result) return 0;
     NSString *rv = res.choices[res.index][@"value"], *fv = fps.choices[fps.index][@"value"];
-    [@{@"resolution": rv, @"frameRate": fv} writeToFile:plistPath atomically:YES];
-    apply(rv, fv);
+    NSString *dv = dist.choices[dist.index][@"value"];
+    [@{@"resolution": rv, @"viewDistance": dv, @"frameRate": fv} writeToFile:plistPath atomically:YES];
+    apply(rv, dv, fv);
     return 1;
 }
