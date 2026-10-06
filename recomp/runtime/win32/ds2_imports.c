@@ -132,14 +132,14 @@ IMPL(user32, RegisterClassExA)                         /* WNDCLASSEXA = cbSize, 
 }
 
 /* ---- gdi32: not reached yet (logged, so the first use shows which is needed) ---- */
-#define GDI_TODO(name, n) IMPL(gdi32, name) { static int once; if (!once++) fprintf(stderr, "w32: gdi32!" #name " is not implemented yet\n"); RET(0, n); }
-GDI_TODO(BitBlt, 9)
-GDI_TODO(CreateDIBSection, 6)
-GDI_TODO(GetCharABCWidthsW, 4)
-GDI_TODO(GetCharWidth32A, 4)
-GDI_TODO(SetPixel, 4)
-GDI_TODO(SetStretchBltMode, 2)
-GDI_TODO(StretchBlt, 11)
+#define TODO_BODY(what, n, v) { static int once; if (!once++) fprintf(stderr, "w32: %s is not implemented yet\n", what); RET(v, n); }
+IMPL(gdi32, BitBlt) TODO_BODY("gdi32!BitBlt", 9, 0)
+IMPL(gdi32, CreateDIBSection) TODO_BODY("gdi32!CreateDIBSection", 6, 0)
+IMPL(gdi32, GetCharABCWidthsW) TODO_BODY("gdi32!GetCharABCWidthsW", 4, 0)
+IMPL(gdi32, GetCharWidth32A) TODO_BODY("gdi32!GetCharWidth32A", 4, 0)
+IMPL(gdi32, SetPixel) TODO_BODY("gdi32!SetPixel", 4, 0)
+IMPL(gdi32, SetStretchBltMode) TODO_BODY("gdi32!SetStretchBltMode", 2, 0)
+IMPL(gdi32, StretchBlt) TODO_BODY("gdi32!StretchBlt", 11, 0)
 IMPL(gdi32, GetGlyphOutlineW) { static int once; if (!once++) fprintf(stderr, "w32: gdi32!GetGlyphOutlineW is not implemented yet\n"); RET(0xffffffffu, 7); }   /* GDI_ERROR */
 
 /* ---- ole32 / oleaut32 ---- */
@@ -202,32 +202,24 @@ IMPL(shell32, SHGetFolderPathW)
 
 /* ---- wintrust, winhttp: not available ---- */
 IMPL(wintrust, WinVerifyTrust) { if (getenv("W32_TRUSTLOG")) fprintf(stderr, "w32: WinVerifyTrust (unsigned)\n"); RET(0x800B0100u, 3); }   /* TRUST_E_NOSIGNATURE */
-#define HTTP_OFF(name, n) IMPL(winhttp, name) { w32_set_last_error(c, 12029); RET(0, n); }   /* ERROR_WINHTTP_CANNOT_CONNECT */
-HTTP_OFF(WinHttpOpen, 5)
-HTTP_OFF(WinHttpConnect, 4)
-HTTP_OFF(WinHttpOpenRequest, 7)
-HTTP_OFF(WinHttpSendRequest, 7)
-HTTP_OFF(WinHttpReceiveResponse, 2)
-HTTP_OFF(WinHttpQueryHeaders, 6)
-HTTP_OFF(WinHttpQueryDataAvailable, 2)
-HTTP_OFF(WinHttpReadData, 4)
+#define HTTP_OFF_BODY(n) { w32_set_last_error(c, 12029); RET(0, n); }   /* ERROR_WINHTTP_CANNOT_CONNECT */
+IMPL(winhttp, WinHttpOpen) HTTP_OFF_BODY(5)
+IMPL(winhttp, WinHttpConnect) HTTP_OFF_BODY(4)
+IMPL(winhttp, WinHttpOpenRequest) HTTP_OFF_BODY(7)
+IMPL(winhttp, WinHttpSendRequest) HTTP_OFF_BODY(7)
+IMPL(winhttp, WinHttpReceiveResponse) HTTP_OFF_BODY(2)
+IMPL(winhttp, WinHttpQueryHeaders) HTTP_OFF_BODY(6)
+IMPL(winhttp, WinHttpQueryDataAvailable) HTTP_OFF_BODY(2)
+IMPL(winhttp, WinHttpReadData) HTTP_OFF_BODY(4)
 IMPL(winhttp, WinHttpCloseHandle) { RET(1, 1); }
 IMPL(winhttp, WinHttpSetStatusCallback) { RET(0, 4); }
 
 /* ---- Direct3D 9 and D3DX: the next step (docs/PLAN.md); for now the game is told Direct3D 9 isn't there ---- */
-IMPL(d3d9, Direct3DCreate9) { fprintf(stderr, "w32: Direct3DCreate9(%u): Direct3D 9 is not implemented yet\n", ARG(0)); RET(0, 1); }
-#define D3DX_TODO(name, n) IMPL(d3dx9_29, name) { fprintf(stderr, "w32: d3dx9!" #name " is not implemented yet\n"); RET(0x80004005u, n); }   /* E_FAIL */
-D3DX_TODO(D3DXCompileShader, 10)
-D3DX_TODO(D3DXCreateCubeTexture, 7)
-D3DX_TODO(D3DXCreateCubeTextureFromFileInMemory, 4)
-D3DX_TODO(D3DXCreateEffect, 9)
-D3DX_TODO(D3DXCreateTexture, 8)
-D3DX_TODO(D3DXCreateTextureFromFileInMemory, 4)
-D3DX_TODO(D3DXCreateVolumeTexture, 9)
-D3DX_TODO(D3DXCreateVolumeTextureFromFileInMemory, 4)
-D3DX_TODO(D3DXFillCubeTextureTX, 2)
-D3DX_TODO(D3DXFillTextureTX, 2)
-D3DX_TODO(D3DXFillVolumeTextureTX, 2)
-D3DX_TODO(D3DXGetShaderInputSemantics, 3)
-D3DX_TODO(D3DXLoadSurfaceFromMemory, 10)
+/* (E_FAIL until written) */
+IMPL(d3dx9_29, D3DXCompileShader) TODO_BODY("d3dx9!D3DXCompileShader", 10, 0x80004005u)
+IMPL(d3dx9_29, D3DXCreateEffect) TODO_BODY("d3dx9!D3DXCreateEffect", 9, 0x80004005u)
+IMPL(d3dx9_29, D3DXFillCubeTextureTX) TODO_BODY("d3dx9!D3DXFillCubeTextureTX", 2, 0x80004005u)
+IMPL(d3dx9_29, D3DXFillTextureTX) TODO_BODY("d3dx9!D3DXFillTextureTX", 2, 0x80004005u)
+IMPL(d3dx9_29, D3DXFillVolumeTextureTX) TODO_BODY("d3dx9!D3DXFillVolumeTextureTX", 2, 0x80004005u)
+IMPL(d3dx9_29, D3DXGetShaderInputSemantics) TODO_BODY("d3dx9!D3DXGetShaderInputSemantics", 3, 0x80004005u)
 IMPL(shfolder, SHGetFolderPathW) { void imp_shell32_SHGetFolderPathW(Ctx *); imp_shell32_SHGetFolderPathW(c); }   /* also looked up there */

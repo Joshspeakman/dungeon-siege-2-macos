@@ -26,3 +26,12 @@ IMPL(dbghelp, SymGetModuleInfo) { RET(0, 3); }
 IMPL(dbghelp, StackWalk) { RET(0, 9); }
 IMPL(dbghelp, SymGetModuleBase) { RET(0, 2); }
 IMPL(dbghelp, SymFunctionTableAccess) { RET(0, 2); }
+/* the 64-bit-address versions Dungeon Siege II looks up (DWORD64 arguments take two stack slots); stack walking and
+ * symbols report nothing, as for DS1 */
+IMPL(dbghelp, StackWalk64) { RET(0, 9); }
+IMPL(dbghelp, SymFromAddr) { RET(0, 5); }                          /* (process, DWORD64 address, *displacement, symbol) */
+IMPL(dbghelp, SymFunctionTableAccess64) { RET(0, 3); }             /* (process, DWORD64 base) */
+IMPL(dbghelp, SymGetLineFromAddr64) { RET(0, 5); }
+IMPL(dbghelp, SymGetModuleBase64) { c->edx = 0; RET(0, 3); }       /* DWORD64 result */
+IMPL(dbghelp, SymGetModuleInfo64) { RET(0, 4); }
+IMPL(dbghelp, SymLoadModule64) { c->edx = 0; RET(0, 7); }          /* (process, file, image, module, DWORD64 base, size) */

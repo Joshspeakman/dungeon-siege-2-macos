@@ -13,14 +13,17 @@ committed.
 | Lifting (`recomp/tools/lift.py`) | all functions lifted, 0 internal errors; ~1,000 unsupported instructions, almost all SSE2 C-runtime paths a CPU without SSE2 skips, or data decoded as code; `lock cmpxchg` added |
 | Multi-image build (`recomp/build.sh`) | the game plus Miles (`mss32.dll`, `msssoft.m3d`, `mssmp3.asi`, `mssdsp.flt`) and Bink: 62,226 functions, compiles and links in about 4 minutes |
 | Windows imports | 517 imported; DS1's runtime covered 345, `ds2_imports.c` adds the rest except Direct3D 9/D3DX (stubs) and Winsock |
-| Start-up | runs natively through the C runtime start-up, settings, language DLL lookup, up to `Direct3DCreate9`; without Direct3D 9 the game shows its error dialog and exits |
+| Start-up | **reaches the main menu natively** (Metal, 800x600): C runtime start-up, settings, archives (filled on first touch through the game's exception filter), Bink intro movie, Winsock, menu art |
+| Direct3D 9 (`d3d9.c`, `d3d9_fmt.c`) | device, swap chain, surfaces, 2D/cube/volume textures (CPU copy in the game's format, BGRA8 on the GPU; DXT decoded), vertex/index buffers, declarations (to FVF), state blocks, queries, fixed-function draws, cursor; shaders stored but not run |
+| D3DX (`d3dx9.c`) | `D3DXCreate*Texture`, textures from DDS/TGA/BMP in memory (missing mips box-filtered, DXT re-encoded), `D3DXLoadSurfaceFromMemory`; effects/HLSL still stubs |
+| Winsock (`winsock.c`) | WSOCK32 1.1 by ordinal on BSD sockets; test mode binds to loopback only |
 
 ## Next steps
 
 | # | Work | Notes |
 |---|---|---|
-| 1 | **Direct3D 9 device on the existing Metal renderer** | `IDirect3D9`/`IDirect3DDevice9` and resources (textures, surfaces, vertex/index buffers, vertex declarations), render/sampler/texture-stage states, transforms, fixed-function draws, render targets, `Present`, `Reset`. New producer next to DS1's `ddraw.c`, same command ring. Build from what the game actually calls (log every method first). |
-| 2 | **D3DX texture loading** | DDS (DXT1/3/5 map to Metal BC formats), TGA/BMP from memory; `D3DXCreateTexture*`, `D3DXLoadSurfaceFromMemory`. |
+| 1 | ~~Direct3D 9 device~~ | done to the main menu; extend as the game calls more |
+| 2 | ~~D3DX texture loading~~ | done (DDS/TGA/BMP); PNG/JPEG not yet (not seen so far) |
 | 3 | **Shaders and effects** | 12 effect files (SM 1.1/2.0 HLSL). Start with effects reported unsupported (the game should fall back), then translate. Options: vkd3d-shader (LGPL) at install time, or a small HLSL-subset → MSL translator. |
 | 4 | **C++ exceptions** | ~1,400 functions with try blocks: catch continuations in the lifter/runtime (extends DS1's `__except` landing pads). Needed as soon as the game throws in normal play. |
 | 5 | Analysis coverage, unresolved jump tables (49) | as in DS1. |

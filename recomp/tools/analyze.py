@@ -43,7 +43,8 @@ OBS = os.path.join(os.path.dirname(os.path.abspath(sys.argv[2])), 'observed_targ
 if os.path.exists(OBS):                      # indirect-branch targets observed at run time (tests/startup.py DISCOVER=)
     for v in json.load(open(OBS)): seeds.setdefault(v, 'observed')
 for name, sva, vs, ra, rs, fl in pe.sections:
-    if name not in ('.rdata', '.data'): continue
+    # every initialised data section that is not code (Bink keeps its blitter tables in BINKDATA)
+    if name in ('.rsrc', '.reloc') or fl & 0x20000000 or not fl & 0x40: continue
     blob = pe.bytes_at(sva, min(vs, rs))
     for k in range(0, len(blob) - 3, 4):
         v = int.from_bytes(blob[k:k + 4], 'little')

@@ -95,6 +95,7 @@ uint32_t vm_alloc(uint32_t addr, uint32_t size, uint32_t type, uint32_t prot)
     }
 out:
     pthread_mutex_unlock(&vm_lock);
+    if (getenv("W32_VMLOG")) fprintf(stderr, "w32: VirtualAlloc(%08x, %x, %x, %x) -> %08x\n", addr, size, type, prot, r);
     return r;
 }
 int vm_free(uint32_t addr, uint32_t size, uint32_t type)
@@ -131,6 +132,7 @@ int vm_free(uint32_t addr, uint32_t size, uint32_t type)
     }
 out:
     pthread_mutex_unlock(&vm_lock);
+    if (getenv("W32_VMLOG")) fprintf(stderr, "w32: VirtualFree(%08x, %x, %x) -> %d\n", addr, size, type, ok);
     return ok;
 }
 int vm_query(uint32_t addr, uint32_t out)
