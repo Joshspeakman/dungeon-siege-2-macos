@@ -20,6 +20,20 @@ static void local_host_name(char *out, size_t cap)
     char *dot = strchr(h, '.'); if (dot && !strcmp(dot, ".local")) *dot = 0;   /* Windows-style short name */
     snprintf(out, cap, "%s", h);
 }
+/* GameSpy (the game's lobby, server list and NAT service, also used for LAN games) shut down in 2014. Its host names
+ * are sent to a replacement, chosen with DS2_LOBBY:
+ *   openspy (default)  OpenSpy, the community-run GameSpy replacement: <name>.gamespy.com -> <name>.openspy.net
+ *   off                the original names (which no longer resolve)
+ * Returns the name to resolve (into buf), or NULL to keep the original. */
+static const char *lobby_rewrite(const char *n, char *buf, size_t cap)
+{
+    static const char *mode; if (!mode) { mode = getenv("DS2_LOBBY"); if (!mode || !*mode) mode = "openspy"; }
+    size_t l = strlen(n); static const char suf[] = ".gamespy.com";
+    if (l <= sizeof suf - 1 || strcasecmp(n + l - (sizeof suf - 1), suf) || !strcasecmp(mode, "off")) return NULL;
+    snprintf(buf, cap, "%.*s.openspy.net", (int)(l - (sizeof suf - 1)), n);
+    static int logged; if (logged++ < 8) fprintf(stderr, "w32: lobby: %s -> %s\n", n, buf);
+    return buf;
+}
 /* gethostbyname: one hostent per thread, as on Windows. Our own name gives every IPv4 interface address (what a host
  * shows its players); other names go to the resolver. Layout: hostent{h_name, h_aliases, h_addrtype, h_length,
  * h_addr_list}, then the pointer arrays, addresses and name. */
@@ -41,8 +55,8 @@ IMPL(wsock32, ord52)
         int dup = 0; for (int i = 0; i < n; i++) if (addrs[i] == pub) dup = 1;
         if (pub && !dup && n < 16) { memmove(addrs + 1, addrs, sizeof *addrs * (size_t)n); addrs[0] = pub; n++; }   /* first: the one to give out */
     } else {
-        struct addrinfo hint = {0}, *res = 0; hint.ai_family = AF_INET;
-        if (getaddrinfo(name, 0, &hint, &res)) RET(0, 1);
+        struct addrinfo hint = {0}, *res = 0; hint.ai_family = AF_INET; char alt[300]; const char *q = lobby_rewrite(name, alt, sizeof alt);
+        if (getaddrinfo(q ? q : name, 0, &hint, &res)) RET(0, 1);
         for (struct addrinfo *r = res; r && n < 16; r = r->ai_next) addrs[n++] = ((struct sockaddr_in *)r->ai_addr)->sin_addr.s_addr;
         freeaddrinfo(res);
         if (!n) RET(0, 1);

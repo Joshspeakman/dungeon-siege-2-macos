@@ -1,7 +1,6 @@
 /* Winsock 1.1 (WSOCK32 by ordinal) on BSD sockets: the TCP and UDP sockets Dungeon Siege II's network layer opens for
  * LAN and direct-IP games. SOCKETs are small handles into a table of host descriptors; fd_sets, sockaddrs, option
- * levels and error codes are translated. In test mode (DS_TEST=1) sockets bound to every interface are bound to the
- * loopback address instead, so test runs never listen on the network. */
+ * levels and error codes are translated. (Router port forwarding is separate: portmap.c, off with DS_NO_PORTMAP=1.) */
 #include "w32.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -32,6 +31,15 @@ static uint32_t wsa_err(int e)
     case EINTR: return 10004; case EMFILE: return 10024; case EBADF: return 10038;
     }
     return 10022;                                       /* WSAEINVAL */
+}
+/* W32_NETLOG=1: each send/recv with its first bytes (development) */
+static void netlog(const char *what, uint32_t sock, const uint8_t *p, long n)
+{
+    static int on = -1; if (on < 0) on = getenv("W32_NETLOG") != 0;
+    if (!on) return;
+    fprintf(stderr, "net: %s %x %ld:", what, sock, n);
+    for (long k = 0; k < n && k < 48; k++) fprintf(stderr, " %02x", p[k]);
+    fprintf(stderr, " |"); for (long k = 0; k < n && k < 48; k++) fputc(p[k] >= 32 && p[k] < 127 ? p[k] : '.', stderr); fprintf(stderr, "|\n");
 }
 static uint32_t fail(Ctx *c, uint32_t e) { w32_set_last_error(c, e); return SOCKET_ERROR_; }
 static uint32_t fail_errno(Ctx *c) { return fail(c, wsa_err(errno)); }
@@ -83,13 +91,13 @@ IMPL(wsock32, ord3)                                     /* closesocket(s) */
 IMPL(wsock32, ord2)                                     /* bind(s, addr, len) */
 {
     SOCK(ARG(0), 3); struct sockaddr_in a; if (!to_host(ARG(1), ARG(2), &a)) RET(fail(c, 10014), 3);
-    if (a.sin_addr.s_addr == htonl(INADDR_ANY) && getenv("DS_TEST")) a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (bind(fd, (struct sockaddr *)&a, sizeof a)) RET(fail_errno(c), 3);
     RET(0, 3);
 }
 IMPL(wsock32, ord4)                                     /* connect(s, addr, len) */
 {
     SOCK(ARG(0), 3); struct sockaddr_in a; if (!to_host(ARG(1), ARG(2), &a)) RET(fail(c, 10014), 3);
+    if (getenv("W32_NETLOG")) { char ip[32]; inet_ntop(AF_INET, &a.sin_addr, ip, sizeof ip); fprintf(stderr, "net: connect %x to %s:%u (fd %d)\n", ARG(0), ip, ntohs(a.sin_port), fd); }
     if (connect(fd, (struct sockaddr *)&a, sizeof a)) RET(fail_errno(c), 3);
     RET(0, 3);
 }
@@ -112,12 +120,14 @@ IMPL(wsock32, ord19)                                    /* send(s, buf, len, fla
 {
     SOCK(ARG(0), 4); ssize_t n = send(fd, GP(ARG(1)), ARG(2), (int)(ARG(3) & 1));
     if (n < 0) RET(fail_errno(c), 4);
+    netlog("send", ARG(0), GP(ARG(1)), n);
     RET((uint32_t)n, 4);
 }
 IMPL(wsock32, ord16)                                    /* recv(s, buf, len, flags) */
 {
     SOCK(ARG(0), 4); ssize_t n = recv(fd, GP(ARG(1)), ARG(2), (int)(ARG(3) & 3));
     if (n < 0) RET(fail_errno(c), 4);
+    netlog("recv", ARG(0), GP(ARG(1)), n);
     RET((uint32_t)n, 4);
 }
 IMPL(wsock32, ord20)                                    /* sendto(s, buf, len, flags, to, tolen) */
@@ -186,31 +196,40 @@ IMPL(wsock32, ord12)                                    /* ioctlsocket(s, cmd, u
     if (cmd == 0x4004667fu) { int n = 0; if (ioctl(fd, FIONREAD, &n)) RET(fail_errno(c), 3); rt_w32(G_MEM, p, (uint32_t)n); RET(0, 3); }   /* FIONREAD */
     RET(fail(c, 10022), 3);
 }
-/* select(nfds, read, write, except, timeout): a Windows fd_set is {u32 count; SOCKET array[64]} */
+/* select(nfds, read, write, except, timeout): a Windows fd_set is {u32 count; SOCKET array[64]}. One poll entry per
+ * socket with the events of every set it is in (macOS's poll misreports a descriptor listed twice). */
 IMPL(wsock32, ord18)
 {
     uint32_t sets[3] = {ARG(1), ARG(2), ARG(3)}, tv = ARG(4);
-    struct pollfd pf[192]; uint32_t who[192]; int setof[192], n = 0;
-    short ev[3] = {POLLIN, POLLOUT, POLLPRI};
+    struct pollfd pf[192]; uint32_t who[192]; int n = 0;
+    static const short ev[3] = {POLLIN, POLLOUT, POLLPRI};
     for (int k = 0; k < 3; k++) {
         if (!sets[k]) continue;
         uint32_t cnt = rt_r32(G_MEM, sets[k]); if (cnt > 64) cnt = 64;
         for (uint32_t i = 0; i < cnt; i++) {
             uint32_t s = rt_r32(G_MEM, sets[k] + 4 + 4 * i); int fd = sfd(s);
             if (fd < 0) RET(fail(c, 10038), 5);
-            pf[n].fd = fd; pf[n].events = ev[k]; pf[n].revents = 0; who[n] = s; setof[n] = k; n++;
+            int j = 0; while (j < n && who[j] != s) j++;
+            if (j == n) { pf[n].fd = fd; pf[n].events = 0; pf[n].revents = 0; who[n] = s; n++; }
+            pf[j].events |= ev[k];
         }
     }
     int ms = tv ? (int)(rt_r32(G_MEM, tv) * 1000 + rt_r32(G_MEM, tv + 4) / 1000) : -1;
     int r = poll(pf, (nfds_t)n, ms);
     if (r < 0) RET(fail_errno(c), 5);
-    uint32_t outn[3] = {0, 0, 0}, total = 0;
-    for (int i = 0; i < n; i++) {
-        int k = setof[i]; short re = pf[i].revents;
-        int hit = k == 0 ? (re & (POLLIN | POLLHUP | POLLERR)) != 0 : k == 1 ? (re & POLLOUT) != 0 : (re & (POLLPRI | POLLERR)) != 0;
-        if (hit) { rt_w32(G_MEM, sets[k] + 4 + 4 * outn[k], who[i]); outn[k]++; total++; }
+    if (getenv("W32_NETLOG") && atoi(getenv("W32_NETLOG")) > 1) for (int i = 0; i < n; i++) fprintf(stderr, "net: select %x events %x revents %x\n", who[i], pf[i].events, pf[i].revents);
+    uint32_t total = 0;
+    for (int k = 0; k < 3; k++) {
+        if (!sets[k]) continue;
+        uint32_t cnt = rt_r32(G_MEM, sets[k]), out = 0; if (cnt > 64) cnt = 64;
+        for (uint32_t i = 0; i < cnt; i++) {
+            uint32_t s = rt_r32(G_MEM, sets[k] + 4 + 4 * i); int j = 0; while (j < n && who[j] != s) j++;
+            short re = j < n ? pf[j].revents : 0;
+            int hit = k == 0 ? (re & (POLLIN | POLLHUP | POLLERR)) != 0 : k == 1 ? (re & POLLOUT) != 0 : (re & (POLLPRI | POLLERR)) != 0;
+            if (hit) { rt_w32(G_MEM, sets[k] + 4 + 4 * out, s); out++; total++; }
+        }
+        rt_w32(G_MEM, sets[k], out);
     }
-    for (int k = 0; k < 3; k++) if (sets[k]) rt_w32(G_MEM, sets[k], outn[k]);
     RET(total, 5);
 }
 IMPL(wsock32, ord151)                                   /* __WSAFDIsSet(s, set) */
