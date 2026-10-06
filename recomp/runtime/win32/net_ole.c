@@ -68,7 +68,9 @@ IMPL(ole32, CoUninitialize) { RET(0, 0); }
 IMPL(ole32, CoCreateInstance)
 {
     uint32_t clsid = ARG(0), out = ARG(4);
-    fprintf(stderr, "w32: CoCreateInstance({%08x-...}) -> class not registered\n", rt_r32(G_MEM, clsid));
+    const uint8_t *g = GP(clsid);
+    fprintf(stderr, "w32: CoCreateInstance({%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}) -> class not registered\n", rt_r32(G_MEM, clsid),
+            rt_r16(G_MEM, clsid + 4), rt_r16(G_MEM, clsid + 6), g[8], g[9], g[10], g[11], g[12], g[13], g[14], g[15]);
     if (out) rt_w32(G_MEM, out, 0);
     RET(0x80040154u, 5);
 }
