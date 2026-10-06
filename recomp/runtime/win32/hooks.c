@@ -3,8 +3,7 @@
  *              continues;
  *   OVERRIDES: at a function's first instruction; return 1 when the whole call (including the return) was done here,
  *              0 to run the original.
- * Dungeon Siege II has none yet; the DS1 port's hooks (draw distance, Skrit messages, shadows, paper doll, expansion)
- * are the model for the ones it will need. */
+ * The DS1 port's hooks (draw distance, Skrit messages, shadows, paper doll, expansion) are the model for more. */
 #include "w32.h"
 #include "ext.h"
 
@@ -48,8 +47,20 @@ void rt_hook(Ctx *c, uint32_t addr)
     }
 }
 
+/* UIFrontend::TransitionToMain (0x44c2d3) ends by disabling the main menu's Multiplayer button: the GOG 2.3 release
+ * shipped without multiplayer (its online service, GameSpy, is gone). The native build plays LAN and internet games
+ * itself (dpnet.c), so that one call (returning to 0x44c37f) is skipped; DS2_NO_MULTIPLAYER=1 keeps the original. */
+static int keep_multiplayer_button(Ctx *c)
+{
+    static int off = -1; if (off < 0) off = getenv("DS2_NO_MULTIPLAYER") != 0;
+    if (off || rt_r32(G_MEM, c->esp) != 0x0044c37fu) return 0;
+    c->esp += 4;                                          /* thiscall, no arguments: just the return */
+    return 1;
+}
 int rt_override(Ctx *c, uint32_t addr)
 {
-    (void)c; (void)addr;
+    switch (addr) {
+    case 0x007663b0u: return keep_multiplayer_button(c);
+    }
     return 0;
 }
