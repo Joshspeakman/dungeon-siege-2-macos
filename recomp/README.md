@@ -30,6 +30,15 @@ Test mode: `DS_TEST=1` (background window, no mouse capture, no launch window), 
 `W32_TRACE=<file>` (every Windows call), `W32_SEHLOG=1` (exceptions and the SEH chain), `W32_VMLOG=1`,
 `W32_REGLOG=1` (registry keys not found), `W32_AUDIOLOG=1`. Crash and hang reports go to `<data>/CrashReports`.
 
+Shader effects (`runtime/win32/hlsl.c`, `d3dx9_fx.c`; the game's Options → Video → Shaders, saved as `shaders = ...` in
+`Save/prefs.gas`): `DS2_SHADERS=0` turns them off (the Radeon 8500 identity, fixed function only). Development:
+`FX_PARAMLOG=1` (each parameter's first and first non-zero value), `FX_FOGLOG=1` (fog parameter changes),
+`FX_DUMP=n` (every parameter at the first n passes of each effect), `D3D9_TEXLOG=n` (texture binding during effect
+passes), `HLSL_MAGENTA=1` (effect pixels drawn magenta), `DSR_FXPATCH="old=>new||old=>new"` (text replaced in every
+effect program's Metal before compiling), `DSR_FXTEXLOG=n` (fog, alpha and textures at effect draws), `DSR_RTLOG=n`
+(render target changes and clears), `DSR_SHOWSURF=<surface id>` (that surface drawn in the screen's corner).
+`tests/hlsl_check.m` compiles every pass of `.fx` files with Metal (`HLSL_DUMP=<technique>` prints its source).
+
 ## Execution model
 
 - **Memory:** one 4 GB host region; guest address = offset. The image sits at its preferred base `0x400000`, so all
