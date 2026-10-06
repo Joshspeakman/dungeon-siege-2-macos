@@ -208,7 +208,11 @@ static void cmd_cap_wait(void)
             memcpy(s, work, (size_t)n * sizeof *s);
             for (int k = 1; k < n; k++) { double x = s[k]; int j = k - 1; while (j >= 0 && s[j] > x) { s[j + 1] = s[j]; j--; } s[j + 1] = x; }
             p90 = s[n * 9 / 10];
-            double up = p90 < 8.333 * 0.90 ? 1000.0 / 120 : (cap_auto == 2 && p90 < 12.5 * 0.90) ? 1000.0 / 80 : 1000.0 / 60;
+            { static int lg = -1; static uint64_t lt; if (lg < 0) lg = getenv("DSR_CAPLOG") != 0;
+              if (lg && t - lt > 1000000) { lt = t; fprintf(stderr, "dsr: game work p50 %.2f p90 %.2f max %.2f ms (cap %.0f)\n", s[n / 2], p90, s[n - 1], 1000 / cap_period_ms); } }
+            /* up when 90% of frames leave 5% of the faster period spare (down only once they overrun it); the game's
+             * work with shader effects on sits about 10% under 120 Hz's 8.3 ms, which a 10% margin never let up */
+            double up = p90 < 8.333 * 0.95 ? 1000.0 / 120 : (cap_auto == 2 && p90 < 12.5 * 0.95) ? 1000.0 / 80 : 1000.0 / 60;
             double down = p90 > 12.5 ? 1000.0 / 60 : p90 > 8.333 ? (cap_auto == 2 ? 1000.0 / 80 : 1000.0 / 60) : 1000.0 / 120;
             if (down > cap_period_ms + 0.1) { cap_period_ms = down; upgrade_since = 0; last_down = t; nw = 0; dsr_log("fps cap auto -> %.0f", 1000 / down); }
             else if (up < cap_period_ms - 0.1 && t - last_down > 30000000) {

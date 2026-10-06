@@ -30,6 +30,11 @@ Test mode: `DS_TEST=1` (background window, no mouse capture, no launch window), 
 `W32_TRACE=<file>` (every Windows call), `W32_SEHLOG=1` (exceptions and the SEH chain), `W32_VMLOG=1`,
 `W32_REGLOG=1` (registry keys not found), `W32_AUDIOLOG=1`. Crash and hang reports go to `<data>/CrashReports`.
 
+Native hot loops (`runtime/win32/native.c`, entered through `tools/lift.py` HOOKS): the vertex lighting of directional
+lights, bit-identical to the original. `DS2_NATIVE=0` runs the recompiled original instead, `DS2_NATIVE_CHECK=1` runs
+both and reports any difference, `DS2_NATIVE_PROF=1` prints the loop's time. `DSR_CAPLOG=1` prints the game's work per
+frame that the automatic frame cadence (120/60) is chosen from.
+
 ## Execution model
 
 - **Memory:** one 4 GB host region; guest address = offset. The image sits at its preferred base `0x400000`, so all
