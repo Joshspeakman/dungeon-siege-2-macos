@@ -5,10 +5,12 @@ as [dungeon-siege-macos](https://github.com/Joshspeakman/dungeon-siege-macos) do
 Rosetta, no emulator. Nothing from the game is in this repository: the build regenerates everything locally from your
 copy, and the game folder is only read.
 
-**State:** playable single player. Main menu, hero creation, the intro movie and opening cutscene, gameplay (world,
-characters, HUD, dialogue), saving and loading, at the display's own resolution and a steady 60 fps (a few ms of GPU
-time per frame). Rendering uses the game's fixed-function path; its optional shader effects are not
-translated yet. Multiplayer, audio checks and longer play-throughs are next: see [docs/PLAN.md](docs/PLAN.md).
+**State: Beta 1.** Single player is playable: main menu, hero creation, the intro movie and opening cutscene,
+gameplay (world, characters, HUD, dialogue), saving and loading, at the display's own resolution and up to 120 fps.
+The game's shader effects (Options → Video → Shaders: water, refraction, glow, heat shimmer) are translated to Metal,
+and a View Distance setting pushes out each area's fog like the SeeFar mods. Multiplayer is switched back on and signs
+in to OpenSpy with an original retail CD key; hosting and joining games are not tested yet
+([docs/MULTIPLAYER.md](docs/MULTIPLAYER.md)). What's next: [docs/PLAN.md](docs/PLAN.md).
 
 ## Install
 
@@ -22,7 +24,7 @@ git clone <this repository> && cd dungeon-siege-2-macos
 ```
 
 This recompiles the game (a few minutes) and installs **Dungeon Siege II Native** in `~/Applications`. Settings, saves
-and logs live in `~/Games/DungeonSiege2Native`. The launch window picks the resolution and frame rate and offers
+and logs live in `~/Games/DungeonSiege2Native`. The launch window picks the resolution, view distance and frame rate, takes a CD key for online play, and offers
 updates: it rebuilds the app from the newest version of this repository and your own copy of the game.
 
 `./install.sh --nightly` installs **Dungeon Siege II Nightly** next to it, built from the `nightly` branch (experimental

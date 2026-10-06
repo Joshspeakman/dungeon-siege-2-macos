@@ -17,10 +17,10 @@ recomp/run.sh "/path/to/Dungeon Siege 2"
 | Analysis (`tools/analyze.py`) | 85,833 functions, 97.1% of `.text`; 479 jump tables resolved, 73 bounded heuristically |
 | Lifter (`tools/lift.py`), runtime core (`runtime/`) | the whole executable and its DLLs compile and link (89,293 functions) |
 | Win32 layer (`runtime/win32`): loader, memory, heaps, threads, SEH, files, registry, USER32 (with timers), GDI, DbgHelp, WSOCK32 (`winsock.c`) | working |
-| Direct3D 9 (`d3d9.c`, `d3d9_fmt.c`) on the Metal renderer (`../src/renderer`), D3DX textures (`d3dx9.c`) | working, fixed-function; effects/HLSL not translated (the game falls back) |
+| Direct3D 9 (`d3d9.c`, `d3d9_fmt.c`) on the Metal renderer (`../src/renderer`), D3DX textures (`d3dx9.c`) | working: fixed function, and the game's HLSL effects compiled to Metal (`hlsl.c`, `d3dx9_fx.c`) |
 | Miles 6.6g (`mss32.dll` and its providers) and Bink, recompiled from the game folder; DirectSound over Core Audio | working |
 | App bundle, installer (`../install.sh`), launch window (`host/launcher.m`) | working |
-| Multiplayer (DirectPlay 8) | disabled by the game itself in this build; see the plan |
+| Multiplayer (DirectPlay 8, GameSpy lobby on OpenSpy) | switched back on: the lobby works with an original CD key; hosting and joining untested (`../docs/MULTIPLAYER.md`) |
 
 The recompiled game runs without Wine or Rosetta: intro, menus, new hero, the campaign, saving and loading.
 
