@@ -1039,10 +1039,10 @@ static void dev_surfaces(Dev9 *d, uint32_t pp)          /* back buffer (and the 
     if (!d->pp[3]) d->pp[3] = 1;
     memcpy(GP(pp), d->pp, 56);                          /* (the game reads back what was chosen) */
     dsr_d3d9_w = d->pp[0]; dsr_d3d9_h = d->pp[1];
+    uint32_t *p = cmd_begin(DSR_MODE, 8); p[0] = d->pp[0]; p[1] = d->pp[1]; cmd_end();   /* first: the renderer sizes the screen's surfaces by it */
     d->back = surf_new(d, d->pp[0], d->pp[1], d->pp[2] == 21 ? 21 : 22, USAGE_RENDERTARGET, 0, 1, 0, 0, 0, 0, 0);
     d->depth = d->pp[9] ? surf_new(d, d->pp[0], d->pp[1], d->pp[10] ? d->pp[10] : 75, USAGE_DEPTHSTENCIL, 0, 2, 0, 0, 0, 0, 0) : 0;
     d->rt = d->back; surf_addref(d->back); d->ds = d->depth; if (d->depth) surf_addref(d->depth);
-    uint32_t *p = cmd_begin(DSR_MODE, 8); p[0] = d->pp[0]; p[1] = d->pp[1]; cmd_end();
     set_rt(d);
 }
 static uint32_t dev_reset(Dev9 *d, uint32_t pp)
@@ -1079,6 +1079,10 @@ static int modes(uint32_t (*out)[2])                    /* the standard sizes th
                                       {1440, 900}, {1600, 900}, {1600, 1200}, {1680, 1050}, {1920, 1080}, {1920, 1200}, {2560, 1440}, {2560, 1600}};
     int n = 0; uint32_t sw = (uint32_t)w32_screen_w, sh = (uint32_t)w32_screen_h;
     for (unsigned k = 0; k < sizeof std / sizeof *std; k++) if (std[k][0] <= sw && std[k][1] <= sh && !(std[k][0] == sw && std[k][1] == sh)) { out[n][0] = std[k][0]; out[n][1] = std[k][1]; n++; }
+    {   /* the resolution the launcher chose (with an interface size, the display's divided by it: e.g. 1152x745) */
+        const char *r = getenv("DS_RESOLUTION"); unsigned rw, rh;
+        if (r && sscanf(r, "%ux%u", &rw, &rh) == 2 && rw >= 640 && rh >= 480 && rw <= 8192 && rh <= 8192 && !(rw == sw && rh == sh)) { out[n][0] = rw; out[n][1] = rh; n++; }
+    }
     out[n][0] = sw; out[n][1] = sh; n++;
     return n;
 }
