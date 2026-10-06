@@ -186,31 +186,39 @@ IMPL(wsock32, ord12)                                    /* ioctlsocket(s, cmd, u
     if (cmd == 0x4004667fu) { int n = 0; if (ioctl(fd, FIONREAD, &n)) RET(fail_errno(c), 3); rt_w32(G_MEM, p, (uint32_t)n); RET(0, 3); }   /* FIONREAD */
     RET(fail(c, 10022), 3);
 }
-/* select(nfds, read, write, except, timeout): a Windows fd_set is {u32 count; SOCKET array[64]} */
+/* select(nfds, read, write, except, timeout): a Windows fd_set is {u32 count; SOCKET array[64]}. One poll entry per
+ * socket with the events of every set it is in (macOS's poll misreports a descriptor listed twice). */
 IMPL(wsock32, ord18)
 {
     uint32_t sets[3] = {ARG(1), ARG(2), ARG(3)}, tv = ARG(4);
-    struct pollfd pf[192]; uint32_t who[192]; int setof[192], n = 0;
-    short ev[3] = {POLLIN, POLLOUT, POLLPRI};
+    struct pollfd pf[192]; uint32_t who[192]; int n = 0;
+    static const short ev[3] = {POLLIN, POLLOUT, POLLPRI};
     for (int k = 0; k < 3; k++) {
         if (!sets[k]) continue;
         uint32_t cnt = rt_r32(G_MEM, sets[k]); if (cnt > 64) cnt = 64;
         for (uint32_t i = 0; i < cnt; i++) {
             uint32_t s = rt_r32(G_MEM, sets[k] + 4 + 4 * i); int fd = sfd(s);
             if (fd < 0) RET(fail(c, 10038), 5);
-            pf[n].fd = fd; pf[n].events = ev[k]; pf[n].revents = 0; who[n] = s; setof[n] = k; n++;
+            int j = 0; while (j < n && who[j] != s) j++;
+            if (j == n) { pf[n].fd = fd; pf[n].events = 0; pf[n].revents = 0; who[n] = s; n++; }
+            pf[j].events |= ev[k];
         }
     }
     int ms = tv ? (int)(rt_r32(G_MEM, tv) * 1000 + rt_r32(G_MEM, tv + 4) / 1000) : -1;
     int r = poll(pf, (nfds_t)n, ms);
     if (r < 0) RET(fail_errno(c), 5);
-    uint32_t outn[3] = {0, 0, 0}, total = 0;
-    for (int i = 0; i < n; i++) {
-        int k = setof[i]; short re = pf[i].revents;
-        int hit = k == 0 ? (re & (POLLIN | POLLHUP | POLLERR)) != 0 : k == 1 ? (re & POLLOUT) != 0 : (re & (POLLPRI | POLLERR)) != 0;
-        if (hit) { rt_w32(G_MEM, sets[k] + 4 + 4 * outn[k], who[i]); outn[k]++; total++; }
+    uint32_t total = 0;
+    for (int k = 0; k < 3; k++) {
+        if (!sets[k]) continue;
+        uint32_t cnt = rt_r32(G_MEM, sets[k]), out = 0; if (cnt > 64) cnt = 64;
+        for (uint32_t i = 0; i < cnt; i++) {
+            uint32_t s = rt_r32(G_MEM, sets[k] + 4 + 4 * i); int j = 0; while (j < n && who[j] != s) j++;
+            short re = j < n ? pf[j].revents : 0;
+            int hit = k == 0 ? (re & (POLLIN | POLLHUP | POLLERR)) != 0 : k == 1 ? (re & POLLOUT) != 0 : (re & (POLLPRI | POLLERR)) != 0;
+            if (hit) { rt_w32(G_MEM, sets[k] + 4 + 4 * out, s); out++; total++; }
+        }
+        rt_w32(G_MEM, sets[k], out);
     }
-    for (int k = 0; k < 3; k++) if (sets[k]) rt_w32(G_MEM, sets[k], outn[k]);
     RET(total, 5);
 }
 IMPL(wsock32, ord151)                                   /* __WSAFDIsSet(s, set) */
