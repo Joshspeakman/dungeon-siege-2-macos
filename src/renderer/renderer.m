@@ -77,7 +77,8 @@ DSRRenderer *dsr_renderer_create(id<MTLDevice> dev)
     r->dev = dev; r->q = [dev newCommandQueue];
     r->lib = [dev newLibraryWithSource:shader_source() options:nil error:&err];
     if (!r->lib) { fprintf(stderr, "shader compile failed: %s\n", err.localizedDescription.UTF8String); exit(1); }
-    r->ring_size = 256u << 20; r->ring = [dev newBufferWithLength:r->ring_size options:MTLResourceStorageModeShared];
+    r->ring_size = 256u << 20;
+    { const char *mb = getenv("DSR_RINGMB"); if (mb && atoi(mb) >= 4 && atoi(mb) <= 256) r->ring_size = (uint32_t)atoi(mb) << 20; }   /* development: a small ring wraps often */ r->ring = [dev newBufferWithLength:r->ring_size options:MTLResourceStorageModeShared];
     { uint32_t w = 0xffffffff; r->white = [dev newBufferWithBytes:&w length:16 options:MTLResourceStorageModeShared]; }
     r->fl_on = getenv("DSR_FLASHLOG") != 0;
     { const char *sc = getenv("DSR_RENDER_SCALE"); r->scale = sc ? (float)atof(sc) : 1; if (!(r->scale >= 1 && r->scale <= 3)) r->scale = 1; }
@@ -162,6 +163,15 @@ static void *ring_alloc(DSRRenderer *r, uint32_t n, uint32_t *off)
         r->ring_off = 0;
     }
     *off = r->ring_off; r->ring_off += n; r->cb_bytes += n; return (uint8_t *)r->ring.contents + *off;
+}
+/* Room for everything one draw takes from the ring (vertices, indices, uniforms, constants, a fan's indices), made
+ * before the draw sets any encoder state: a wrap in the middle of a draw commits, which ends the encoder, and the draw
+ * then went to a new encoder without its pipeline (a crash in the GPU driver every few minutes of play). */
+static void ring_room(DSRRenderer *r, uint64_t n)
+{
+    n += 6 * 256;                                   /* each allocation rounds up to 256 */
+    if (n > r->ring_size) return;
+    if (r->ring_off + n > r->ring_size) { commit(r); if (r->last_cb) [r->last_cb waitUntilCompleted]; r->ring_off = 0; }
 }
 static id<MTLBlitCommandEncoder> blit_enc(DSRRenderer *r)
 {
@@ -419,6 +429,7 @@ static void draw(DSRRenderer *r, const uint32_t *p, uint32_t size)
     }
     if (!nv || 16 + (uint64_t)nv * stride + (uint64_t)ni * 2 > size) { dsr_stat[1]++; return; }   /* 64-bit: no wrap */
     if (prim == 6 && (ni ? ni : nv) < 3) return;                                 /* a fan of fewer than 3: nothing (as D3D) */
+    ring_room(r, (uint64_t)nv * stride + (uint64_t)ni * 2 + sizeof(Uniforms) + (uint64_t)(ni ? ni : nv) * 6);
     { static int na = -1, nb = -1; if (na < 0) { na = nb = getenv("DSR_GLOWLOG") ? 400 : 0; } Surf *t_ = surf(r, r->rt), *x0_ = surf(r, r->tex[0]);
       int into = t_ && t_->fxrt, add = r->rs[27] && r->rs[19] == 2 && r->rs[20] == 2 && x0_ && x0_->fxrt;
       if ((into && na > 0) || (add && nb > 0)) { if (into) na--; else nb--; float fs, fe; memcpy(&fs, &r->rs[36], 4); memcpy(&fe, &r->rs[37], 4);
@@ -531,6 +542,7 @@ static void draw_prog(DSRRenderer *r, const uint32_t *p, uint32_t size)
     if (!nv || !ns || 20 + (uint64_t)nv * stride + (uint64_t)ni * 2 > size) { dsr_stat[1]++; return; }
     if (prim == 6 && (ni ? ni : nv) < 3) return;
     if (r->cur_prog >= 1024 || !r->prog[r->cur_prog].vs) return;
+    ring_room(r, (uint64_t)nv * stride + (uint64_t)ni * 2 + 16ull * (r->npconst ? r->npconst : 1) + (uint64_t)(ni ? ni : nv) * 6);
     if (r->fl_on) {
         int k = 0; while (k < r->fl_np && r->fl_prog[k][0] != r->cur_prog) k++;
         if (k == r->fl_np && k < 24) { r->fl_prog[k][0] = r->cur_prog; r->fl_prog[k][1] = 0; r->fl_np++; }
