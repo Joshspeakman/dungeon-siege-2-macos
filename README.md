@@ -7,7 +7,7 @@ copy, and the game folder is only read.
 
 **State:** playable single player. Main menu, hero creation, the intro movie and opening cutscene, gameplay (world,
 characters, HUD, dialogue), saving and loading, at the display's own resolution and a steady 60 fps (a few ms of GPU
-time per frame on an M1 Pro). Rendering uses the game's fixed-function path; its optional shader effects are not
+time per frame). Rendering uses the game's fixed-function path; its optional shader effects are not
 translated yet. Multiplayer, audio checks and longer play-throughs are next: see [docs/PLAN.md](docs/PLAN.md).
 
 ## Install
