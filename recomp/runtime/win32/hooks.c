@@ -78,8 +78,10 @@ static int keep_multiplayer_button(Ctx *c)
     c->esp += 4;                                          /* thiscall, no arguments: just the return */
     return 1;
 }
+int native_override(Ctx *c, uint32_t addr);   /* native.c */
 int rt_override(Ctx *c, uint32_t addr)
 {
+    if (native_override(c, addr)) return 1;
     switch (addr) {
     case 0x007663b0u: return keep_multiplayer_button(c);
     }
