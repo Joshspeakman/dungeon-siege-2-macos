@@ -278,6 +278,7 @@ IMPL(user32, GetLastActivePopup) { RET(ARG(0), 1); }
 IMPL(user32, GetDlgCtrlID) { Win *w = W(ARG(0)); RET(w ? w->id : 0, 1); }
 
 /* ---- messages: one queue per thread id ---- */
+#define WM_TIMER_ 0x113u
 typedef struct Msg { uint32_t hwnd, msg, wp, lp, time, x, y; } Msg;
 typedef struct Queue { uint32_t tid; Msg q[512]; int head, n; int quit; uint32_t quit_code; } Queue;
 static Queue queues[MAX_THREADS]; static pthread_mutex_t qlock = PTHREAD_MUTEX_INITIALIZER;
@@ -297,6 +298,27 @@ void w32_post(uint32_t tid, uint32_t hwnd, uint32_t msg, uint32_t wp, uint32_t l
     pthread_mutex_unlock(&qlock);
 }
 void (*w32_host_pump)(void);           /* backend: turn host events into posted messages */
+/* timers (SetTimer): WM_TIMER is made when a thread looks at its queue and a timer of it is due (after posted
+ * messages, as on Windows); DispatchMessage calls the TIMERPROC when the timer has one */
+typedef struct Timer { uint32_t tid, hwnd, id, ms, proc; double due; } Timer;
+static Timer timers[64]; static pthread_mutex_t tlock = PTHREAD_MUTEX_INITIALIZER;
+static double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e3 + t.tv_nsec / 1e6; }
+static int timer_due(Ctx *c, uint32_t out, uint32_t hwnd, uint32_t lo, uint32_t hi, int remove)
+{
+    if ((lo || hi) && (WM_TIMER_ < lo || WM_TIMER_ > hi)) return 0;
+    double t = now_ms(); uint32_t tid = w32_tid(c);
+    pthread_mutex_lock(&tlock);
+    for (int k = 0; k < 64; k++) {
+        Timer *m = &timers[k];
+        if (!m->ms || t < m->due || (m->hwnd ? (hwnd && m->hwnd != hwnd) : m->tid != tid)) continue;
+        if (m->hwnd) { Win *w = W(m->hwnd); if (!w) continue; }
+        Msg g = {m->hwnd, WM_TIMER_, m->id, m->proc, msg_time(), 0, 0}; memcpy(GP(out), &g, sizeof g);
+        if (remove) m->due = t + m->ms;
+        pthread_mutex_unlock(&tlock); return 1;
+    }
+    pthread_mutex_unlock(&tlock);
+    return 0;
+}
 static int peek(Ctx *c, uint32_t out, uint32_t hwnd, uint32_t lo, uint32_t hi, int remove)
 {
     if (w32_host_pump) w32_host_pump();
@@ -316,6 +338,7 @@ static int peek(Ctx *c, uint32_t out, uint32_t hwnd, uint32_t lo, uint32_t hi, i
         pthread_mutex_unlock(&qlock); return 1;
     }
     pthread_mutex_unlock(&qlock);
+    if (timer_due(c, out, hwnd, lo, hi, remove)) return 1;
     for (int k = 0; k < MAXW; k++) if (wins[k].hwnd && wins[k].invalid && wins[k].visible && (!hwnd || wins[k].hwnd == hwnd) && (!(lo || hi) || (WM_PAINT >= lo && WM_PAINT <= hi))) {
         Msg m = {wins[k].hwnd, WM_PAINT, 0, 0, msg_time(), 0, 0}; memcpy(GP(out), &m, sizeof m); return 1;
     }
@@ -340,6 +363,10 @@ IMPL(user32, DispatchMessageA)
 {
     uint32_t m = ARG(0), hwnd = rt_r32(G_MEM, m), msg = rt_r32(G_MEM, m + 4);
     Win *w = W(hwnd);
+    if (msg == WM_TIMER_ && rt_r32(G_MEM, m + 12)) {         /* a TIMERPROC(hwnd, WM_TIMER, id, time) */
+        uint32_t a[4] = {hwnd, WM_TIMER_, rt_r32(G_MEM, m + 8), rt_r32(G_MEM, m + 16)};
+        w32_callback(c, rt_r32(G_MEM, m + 12), 4, a); RET(0, 1);
+    }
     if (msg == WM_PAINT && w) w->invalid = 0;
     RET(w ? send(c, hwnd, msg, rt_r32(G_MEM, m + 8), rt_r32(G_MEM, m + 12)) : 0, 1);
 }
@@ -558,3 +585,27 @@ uint32_t w32_window_tid(uint32_t hwnd) { Win *w = W(hwnd); return w ? w->tid : 0
 void w32_window_client_origin(uint32_t hwnd, int *x, int *y) { Win *w = W(hwnd); *x = *y = 0; if (w) client_origin(w, x, y); }
 uint32_t w32_active_window(void) { return active_hwnd; }
 uint32_t w32_top_window(void) { return active_hwnd; }
+
+IMPL(user32, SetTimer)                                  /* (hwnd, id, ms, proc): window timers keep their id; thread timers get one */
+{
+    uint32_t hwnd = ARG(0), id = ARG(1), ms = ARG(2) < 10 ? 10 : ARG(2), proc = ARG(3), r = 0;
+    pthread_mutex_lock(&tlock);
+    int k = -1;
+    if (hwnd) for (int j = 0; j < 64; j++) if (timers[j].ms && timers[j].hwnd == hwnd && timers[j].id == id) k = j;
+    if (k < 0) for (int j = 0; j < 64; j++) if (!timers[j].ms) { k = j; break; }
+    if (k >= 0) {
+        static uint32_t next_id = 0x7000;
+        Timer *m = &timers[k]; m->tid = w32_tid(c); m->hwnd = hwnd; m->id = hwnd ? id : ++next_id; m->ms = ms; m->proc = proc; m->due = now_ms() + ms;
+        r = hwnd ? (id ? id : 1) : m->id;
+    }
+    pthread_mutex_unlock(&tlock);
+    RET(r, 4);
+}
+IMPL(user32, KillTimer)
+{
+    uint32_t hwnd = ARG(0), id = ARG(1), ok = 0;
+    pthread_mutex_lock(&tlock);
+    for (int j = 0; j < 64; j++) if (timers[j].ms && timers[j].hwnd == hwnd && timers[j].id == id && (hwnd || timers[j].tid == w32_tid(c))) { timers[j].ms = 0; ok = 1; }
+    pthread_mutex_unlock(&tlock);
+    RET(ok, 2);
+}
