@@ -1,5 +1,6 @@
 // hlsl_check <file.fx>...: parses each effect with runtime/win32/hlsl.c, compiles every pass to Metal and has the Metal
-// compiler build it (the way the runtime will). Prints the techniques, passes and any errors; -v dumps the source of a
+// compiler build it (the way the runtime will). Prints the techniques, passes and any errors (HLSL_DUMP=<technique> prints
+// that technique's source); -v dumps the source of a
 // failing pass. Build: clang -fobjc-arc -framework Metal -framework Foundation -I runtime/win32 tests/hlsl_check.m runtime/win32/hlsl.c
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
@@ -28,6 +29,7 @@ int main(int argc, char **argv)
                     if (!lib || ![lib newFunctionWithName:@"vs_fx"] || ![lib newFunctionWithName:@"fs_fx"]) err = e.localizedDescription ?: @"functions missing";
                 }
                 printf("  %-40s pass %d: %s%s%s\n", fx->t[t].name, p, err ? "FAILED " : "ok", pr->vs_ffp ? " (fixed-function vertex)" : "", pr->ps_ffp ? " (fixed-function pixel)" : "");
+                if (!err && getenv("HLSL_DUMP") && !strcmp(getenv("HLSL_DUMP"), fx->t[t].name)) printf("----- source -----\n%.*s\n------------------\n", (int)pr->msl_len, pr->msl);
                 if (err) { bad++; printf("    %s\n", [[err componentsSeparatedByString:@"\n"] componentsJoinedByString:@"\n    "].UTF8String); if (verbose && pr->msl) printf("----- source -----\n%.*s\n------------------\n", (int)pr->msl_len, pr->msl); }
                 hlsl_program_free(pr);
             }

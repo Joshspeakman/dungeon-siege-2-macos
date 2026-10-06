@@ -599,6 +599,9 @@ static int ceval(HFx *fx, HExpr *e, float *out, int cap, int depth)
     }
     return 0;
 }
+int hlsl_eval(HFx *fx, HExpr *e, float *out, int cap) { return ceval(fx, e, out, cap, 0); }
+int hlsl_expr_is_float(const HExpr *e) { return e && e->t.base == HB_FLOAT; }
+const char *hlsl_expr_string(const HExpr *e) { return e && e->k == E_NUM && e->t.base == HB_STRING ? e->name : NULL; }
 int hlsl_eval_init(HFx *fx, HVar *v)
 {
     if (v->defval) return v->ndef;
@@ -1155,7 +1158,8 @@ static void gen_ps(Gen *g, B *b, HState *s)
         if (k0 < 0) { gerr(g, "pixel shader %s has no COLOR0 output", f->name); return; }
         char v[96]; snprintf(v, sizeof v, "r.m_%s", st->f[k0].name); bp(b, "    float4 c = "); if (st->f[k0].t.cols == 3) bp(b, "float4(%s, 1)", v); else to_f4(g, b, v, st->f[k0].t, "0, 0, 1"); bp(b, ";\n");
     } else { bp(b, "    float4 c = "); if (f->ret.cols == 3) bp(b, "float4(r, 1)"); else to_f4(g, b, "r", f->ret, "0, 0, 1"); bp(b, ";\n"); }
-    bp(b, "    return ffp_finish(c, in.fog, u);\n}\n");
+    if (getenv("HLSL_MAGENTA")) bp(b, "    return float4(1, 0, 1, 1);   // HLSL_MAGENTA (development)\n}\n");
+    else bp(b, "    return ffp_finish(c, in.fog, u);\n}\n");
 }
 static HState *shader_state(HPass *ps, const char *name)
 {
@@ -1190,7 +1194,7 @@ HProgram *hlsl_compile_pass(HFx *fx, int tech, int pass)
             pr->sslot[k] = v + 1; used[k] = 1;
         }
         int n = 0; for (int k = 0; k < 16; k++) if (used[k]) n = k + 1;
-        for (int k = 0; k < 16; k++) pr->sslot[k] = used[k] ? pr->sslot[k] - 1 : -1;
+        for (int k = 0; k < 16; k++) { pr->sslot[k] = used[k] ? pr->sslot[k] - 1 : -1; pr->skind[k] = pr->sslot[k] >= 0 ? sampler_texture_kind(&g, pr->sslot[k]) : HS_2D; }
         pr->nsamp = n;
     }
     B b = {0}; char tb[80];

@@ -73,11 +73,25 @@ struct Dev9 {
     SB9 *rec;                                           /* recording a state block (BeginStateBlock) */
     Surf9 *cursor; int cursor_x, cursor_y, cursor_hx, cursor_hy, cursor_show;
     uint8_t *vbuf; size_t vbuf_cap;                     /* draw-time staging */
+    uint32_t prog;                                      /* an effect pass's Metal program (d3dx9_fx.c), 0 if none */
 };
 
 /* d3d9.c */
 uint32_t d9_create_tex(Dev9 *d, int type, uint32_t w, uint32_t h, uint32_t dep, uint32_t levels, uint32_t usage, uint32_t fmt, uint32_t pool, uint32_t out);
 Tex9 *d9_any_tex(uint32_t g);
+void d9_tex_addref(uint32_t g); void d9_tex_release(uint32_t g);   /* a texture interface's reference (0 ignored) */
 uint32_t d9_surf_lock(Surf9 *s, uint32_t locked, uint32_t rect, uint32_t flags);
 uint32_t d9_surf_unlock(Surf9 *s);
 void d9_surf_upload(Surf9 *s, uint32_t y0, uint32_t y1);
+/* for the effect framework (d3dx9_fx.c) */
+void d9_set_rs(Dev9 *d, uint32_t s, uint32_t v);
+void d9_set_tss(Dev9 *d, uint32_t stage, uint32_t t, uint32_t v);
+void d9_set_ss(Dev9 *d, uint32_t sampler, uint32_t t, uint32_t v);
+void d9_set_texture(Dev9 *d, uint32_t stage, uint32_t tex_iface);     /* 0: none */
+uint32_t d9_texture_at(Dev9 *d, uint32_t stage);                       /* the interface bound there, or 0 */
+uint32_t d9_program_create(const char *msl, size_t len, uint32_t kinds);
+void d9_program_use(Dev9 *d, uint32_t prog);
+void d9_program_consts(Dev9 *d, const float *regs, int nregs);
+void *d9_state_save(Dev9 *d);                                          /* render/stage/sampler states, textures, program */
+void d9_state_restore(Dev9 *d, void *saved);                           /* and frees it */
+int d9_shaders_on(void);
