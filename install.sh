@@ -1,6 +1,11 @@
 #!/bin/bash
 # install.sh --game-dir <Dungeon Siege II folder> [--app-dir DIR] [--data-dir DIR]
 # install.sh --gog-installer <setup_dungeon_siege_2_*.exe>   (GOG offline installer; needs: brew install innoextract)
+# install.sh --cd-key                  multiplayer: asks for the product key of your own retail copy (25 characters, on the
+#                                      disc case) and stores what the retail installer would have derived from it (the
+#                                      "DoubleHash" the game presents to the GameSpy/OpenSpy lobby) in the data folder.
+#                                      The key itself is not stored. Without it, multiplayer stops at "Could not find a
+#                                      valid CDKey". DS2_CDKEY=<key> gives it without the prompt.
 # install.sh --nightly                 installs "Dungeon Siege II Nightly.app" next to the stable app: the newest
 #                                      experimental work (the repository's nightly branch, fetched from GitHub and
 #                                      built in build/nightly; this checkout is left as it is). It shares the data
@@ -15,10 +20,10 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GAME=""; GOG_EXE=""; APPS="$HOME/Applications"; DATA="$HOME/Games/DungeonSiege2Native"
-NIGHTLY=""; AS_NIGHTLY=""; ARGS=()
+NIGHTLY=""; AS_NIGHTLY=""; CDKEY=""; ARGS=()
 GOG_SHA=c17e1cc9e01b5d2439a92e06b905040379ad4bb8618b822582c46f5fa29db4e2
 while [ $# -gt 0 ]; do
-  case "$1" in --nightly) NIGHTLY=1; shift; continue;; --as-nightly) AS_NIGHTLY=1; shift; continue;; esac
+  case "$1" in --nightly) NIGHTLY=1; shift; continue;; --as-nightly) AS_NIGHTLY=1; shift; continue;; --cd-key) CDKEY=1; shift; continue;; esac
   ARGS+=("$1"); [ $# -gt 1 ] && case "$1" in --*) case "$2" in --*) ;; *) ARGS+=("$2");; esac;; esac
   case "$1" in
     --game-dir) GAME="$2"; shift 2;; --gog-installer) GOG_EXE="$2"; shift 2;; --app-dir) APPS="$2"; shift 2;; --data-dir) DATA="$2"; shift 2;;
@@ -35,6 +40,29 @@ installed_game() {     # the game folder an installed app was set up with (for r
     if [ -n "$v" ]; then eval "x=$v"; printf '%s\n' "$x"; return 0; fi
   done; return 0
 }
+# --cd-key: the retail installer's DoubleHash of the player's product key: the key's 25 characters (alphabet
+# BCDFGHJKMPQRTVWXY2346789) read as a base-24 number into 15 little-endian bytes, SHA-1 of that, SHA-1 of the digest,
+# the first 8 bytes (as the installer's Setup.exe computes it)
+if [ -n "$CDKEY" ]; then
+  K="${DS2_CDKEY:-}"; if [ -z "$K" ]; then printf 'Product key (25 characters, dashes optional): '; IFS= read -rs K; echo; fi
+  mkdir -p "$DATA"
+  DS2_CDKEY="$K" python3 - "$DATA/cdkey-hash.txt" <<'PY' || exit 1
+import hashlib, os, sys
+A = "BCDFGHJKMPQRTVWXY2346789"; key = os.environ["DS2_CDKEY"].upper().replace("-", "").replace(" ", "")
+if len(key) != 25 or any(c not in A for c in key): sys.exit("That is not a product key: 25 characters from " + A + ".")
+buf = bytearray(15); top = 0
+for ch in key:
+    c = A.index(ch)
+    for i in range(top + 1):
+        v = buf[i] * 24 + c; buf[i] = v & 255; c = v >> 8
+    if c: top += 1; buf[top] = c
+h = hashlib.sha1(hashlib.sha1(bytes(buf)).digest()).digest()[:8]
+with open(sys.argv[1], "w") as f: f.write(h.hex() + "\n")
+os.chmod(sys.argv[1], 0o600)
+print("== CD key stored for multiplayer (only its hash) in " + sys.argv[1])
+PY
+  [ -n "$GAME$GOG_EXE" ] || exit 0
+fi
 # --nightly: fetch the nightly branch into build/nightly and let its own install.sh install the nightly app
 if [ -n "$NIGHTLY" ] && [ -z "$AS_NIGHTLY" ]; then
   command -v git >/dev/null || { echo "git is needed for --nightly"; exit 1; }
