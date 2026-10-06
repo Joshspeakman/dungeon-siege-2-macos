@@ -6,7 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-int dsr_verbose; long dsr_stat[8]; double dsr_gpu_ms[100000]; int dsr_frame;
+volatile int dsr_flash_frame; int dsr_verbose; long dsr_stat[8]; double dsr_gpu_ms[100000]; int dsr_frame;
 #define MAXSURF 65536
 #define STAGE_SURF (MAXSURF - 2)    /* pixels for a scaled surface, before they are drawn into it larger (and reads, smaller) */
 /* w, h: the game's size of a surface. sc: how much larger its texture is (the interface size, DSR_RENDER_SCALE: the game
@@ -27,6 +27,9 @@ typedef struct {   // must match shaders.metal Uniforms
 } Uniforms;
 
 struct DSRRenderer {
+    /* DSR_FLASHLOG=1: every shown frame sampled 32x32 (as seen: gamma applied) and checked for a white screen or a sudden
+     * flash; what drew the frame (effect programs, fixed-function draws, target switches, white clears) is logged with it */
+    int fl_on; id<MTLTexture> fl_probe[4]; int fl_i; uint32_t fl_prog[24][2]; int fl_np; uint32_t fl_ff, fl_rtsw, fl_wclear, fl_draws_fx;
     float scale; uint32_t mode_w, mode_h;   /* the interface size (1: none) and the game's display mode */
     id<MTLDevice> dev; id<MTLCommandQueue> q; id<MTLLibrary> lib;
     Surf s[MAXSURF];
@@ -76,6 +79,7 @@ DSRRenderer *dsr_renderer_create(id<MTLDevice> dev)
     if (!r->lib) { fprintf(stderr, "shader compile failed: %s\n", err.localizedDescription.UTF8String); exit(1); }
     r->ring_size = 256u << 20; r->ring = [dev newBufferWithLength:r->ring_size options:MTLResourceStorageModeShared];
     { uint32_t w = 0xffffffff; r->white = [dev newBufferWithBytes:&w length:16 options:MTLResourceStorageModeShared]; }
+    r->fl_on = getenv("DSR_FLASHLOG") != 0;
     { const char *sc = getenv("DSR_RENDER_SCALE"); r->scale = sc ? (float)atof(sc) : 1; if (!(r->scale >= 1 && r->scale <= 3)) r->scale = 1; }
     for (int k = 0; k < 32; k++) mat_ident(r->xf[k]);
     for (int k = 0; k < 256; k++) r->rs[k] = 0;
@@ -527,6 +531,11 @@ static void draw_prog(DSRRenderer *r, const uint32_t *p, uint32_t size)
     if (!nv || !ns || 20 + (uint64_t)nv * stride + (uint64_t)ni * 2 > size) { dsr_stat[1]++; return; }
     if (prim == 6 && (ni ? ni : nv) < 3) return;
     if (r->cur_prog >= 1024 || !r->prog[r->cur_prog].vs) return;
+    if (r->fl_on) {
+        int k = 0; while (k < r->fl_np && r->fl_prog[k][0] != r->cur_prog) k++;
+        if (k == r->fl_np && k < 24) { r->fl_prog[k][0] = r->cur_prog; r->fl_prog[k][1] = 0; r->fl_np++; }
+        if (k < 24) r->fl_prog[k][1]++; r->fl_draws_fx++;
+    }
     Surf *rt = surf(r, r->rt), *ds = surf(r, r->ds); if (!rt) { dsr_stat[2]++; return; }
     ds = depth_with(r, rt, ds);
     id<MTLRenderPipelineState> pso = prog_pipeline(r, mask, ds != NULL); if (!pso) { dsr_stat[3]++; return; }
@@ -606,6 +615,7 @@ static void clear_rect(DSRRenderer *r, uint32_t flags, uint32_t color, float z, 
 
 static void clear(DSRRenderer *r, const uint32_t *p, uint32_t size)
 {
+    if (r->fl_on && (p[0] & 1) && (p[1] & 0xffffff) == 0xffffff) r->fl_wclear++;   /* a clear to white (DSR_FLASHLOG) */
     uint32_t flags = p[0], color = p[1]; float z; memcpy(&z, &p[2], 4);
     Surf *rt = surf(r, r->rt), *ds = surf(r, r->ds); if (!rt) return;
     ds = depth_with(r, rt, ds);
@@ -658,7 +668,46 @@ id<MTLCommandBuffer> dsr_renderer_present_to(DSRRenderer *r, id<MTLTexture> dst)
     [e setFragmentTexture:s->tex atIndex:0]; [e setFragmentTexture:r->gamma_lut atIndex:1];
     [e setFragmentSamplerState:(dst.width == s->tex.width && dst.height == s->tex.height) ? r->point_clamp : r->linear_clamp atIndex:0];
     [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-    if (r->g_on) {   // frame-time graph, bottom-left: 240 columns, 0..40 ms
+    if (r->fl_on) {   /* DSR_FLASHLOG: the frame as shown, sampled 32x32, checked when the GPU is done */
+        [e endEncoding];
+        int i = r->fl_i++ & 3;
+        if (!r->fl_probe[i]) {
+            MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:32 height:32 mipmapped:NO];
+            d.usage = MTLTextureUsageRenderTarget; d.storageMode = MTLStorageModeShared; r->fl_probe[i] = [r->dev newTextureWithDescriptor:d];
+        }
+        MTLRenderPassDescriptor *pp = [MTLRenderPassDescriptor renderPassDescriptor];
+        pp.colorAttachments[0].texture = r->fl_probe[i]; pp.colorAttachments[0].loadAction = MTLLoadActionDontCare; pp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        e = [cmdbuf(r) renderCommandEncoderWithDescriptor:pp];
+        [e setRenderPipelineState:r->present_pso]; [e setFragmentTexture:s->tex atIndex:0]; [e setFragmentTexture:r->gamma_lut atIndex:1];
+        [e setFragmentSamplerState:r->point_clamp atIndex:0]; [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        id<MTLTexture> probe = r->fl_probe[i]; int frame = dsr_frame;
+        char ctx[600]; int n = snprintf(ctx, sizeof ctx, "fixed %u, effects %u, target switches %u, white clears %u | programs", r->fl_ff, r->fl_draws_fx, r->fl_rtsw, r->fl_wclear);
+        for (int k = 0; k < r->fl_np && n < (int)sizeof ctx - 24; k++) n += snprintf(ctx + n, sizeof ctx - n, " %u:%u", r->fl_prog[k][0], r->fl_prog[k][1]);
+        NSString *what = @(ctx); r->fl_np = 0; r->fl_ff = r->fl_rtsw = r->fl_wclear = r->fl_draws_fx = 0;
+        [r->cb addCompletedHandler:^(id<MTLCommandBuffer> cb) { (void)cb;
+            uint8_t px[32 * 32 * 4]; [probe getBytes:px bytesPerRow:128 fromRegion:MTLRegionMake2D(0, 0, 32, 32) mipmapLevel:0];
+            double m[3] = {0, 0, 0}, lum = 0; int white = 0;
+            for (int k = 0; k < 1024; k++) { double b = px[4 * k] / 255.0, g = px[4 * k + 1] / 255.0, rr = px[4 * k + 2] / 255.0, l = 0.299 * rr + 0.587 * g + 0.114 * b;
+                m[0] += rr; m[1] += g; m[2] += b; lum += l; if (l > 0.92) white++; }
+            lum /= 1024; m[0] /= 1024; m[1] /= 1024; m[2] /= 1024; double wf = white / 1024.0;
+            static double el, ew, ec[3]; static int warm;
+            const char *kind = NULL;
+            if (warm > 30) {
+                if (wf > 0.5 && ew < 0.25) kind = "WHITE";
+                else if (fabs(lum - el) > 0.22) kind = "FLASH";
+                else for (int c = 0; c < 3; c++) if (fabs(m[c] - ec[c]) > 0.25) kind = c == 1 ? "GREEN FLASH" : c == 0 ? "RED FLASH" : "BLUE FLASH";
+            }
+            if (kind) {
+                fprintf(stderr, "dsr: %s frame %d: brightness %.2f (recently %.2f), white %.0f%%, rgb %.2f %.2f %.2f | %s\n", kind, frame, lum, el, wf * 100, m[0], m[1], m[2], what.UTF8String);
+                extern volatile int dsr_flash_frame, dsr_trace_req; dsr_flash_frame = frame;
+                static int traced; if (wf > 0.5 && traced++ < 2) dsr_trace_req = 1;   /* the next frame's commands, twice per run */
+            }
+            double a = warm < 30 ? 0.3 : kind ? 0.02 : 0.1; warm++;
+            el += a * (lum - el); ew += a * (wf - ew); for (int c = 0; c < 3; c++) ec[c] += a * (m[c] - ec[c]);
+        }];
+        [e endEncoding]; e = nil;
+    }
+    if (r->g_on && !r->fl_on) {   // frame-time graph, bottom-left: 240 columns, 0..40 ms
         if (!r->graph_pso) {
             MTLRenderPipelineDescriptor *gd = [MTLRenderPipelineDescriptor new]; NSError *err = nil;
             gd.vertexFunction = [r->lib newFunctionWithName:@"vs_present"]; gd.fragmentFunction = [r->lib newFunctionWithName:@"fs_graph"];
@@ -713,9 +762,33 @@ void dsr_renderer_presented_size(DSRRenderer *r, uint32_t *w, uint32_t *h) { Sur
 id<MTLTexture> dsr_renderer_rt(DSRRenderer *r) { Surf *s = surf(r, r->rt); return s ? s->tex : nil; }
 id<MTLTexture> dsr_renderer_presented(DSRRenderer *r) { Surf *s = surf(r, r->presented); return s ? s->tex : nil; }
 
+/* DSR_FLASHLOG's trace: every command of one frame (the one after a white frame is flagged, or DSR_TRACEBASE=<frame>) */
+volatile int dsr_trace_req;
+static void trace_cmd(DSRRenderer *r, uint32_t op, const uint32_t *p, uint32_t size)
+{
+    Surf *t;
+    switch (op) {
+    case DSR_SET_RT: t = surf(r, p[0]); fprintf(stderr, "trace: target %u (%ux%u fmt %u kind %u) depth %u\n", p[0], t ? t->w : 0, t ? t->h : 0, t ? t->fmt : 0, t ? t->kind : 0, p[1]); break;
+    case DSR_CLEAR: fprintf(stderr, "trace: clear target %u flags %x color %08x rects %u viewport %.0f,%.0f %.0fx%.0f\n", r->rt, p[0], p[1], size >= 20 ? p[4] : 0, r->vp[0], r->vp[1], r->vp[2], r->vp[3]); break;
+    case DSR_BLT: fprintf(stderr, "trace: blt %u <- %u [%d,%d,%d,%d] <- [%d,%d,%d,%d] flags %x fill %08x\n", p[0], p[5], (int)p[1], (int)p[2], (int)p[3], (int)p[4], (int)p[6], (int)p[7], (int)p[8], (int)p[9], p[10], p[11]); break;
+    case DSR_DRAW: case DSR_DRAW_PROG: {
+        Surf *t0 = surf(r, r->tex[0]);
+        fprintf(stderr, "trace: %s target %u prog %u prim %u nv %u | blend %u %u/%u z %u/%u atest %u | tex0 %u (%ux%u fmt %u) op %u/%u a %u/%u | tfactor %08x vp %.0fx%.0f\n",
+                op == DSR_DRAW ? "draw" : "draw_prog", r->rt, op == DSR_DRAW_PROG ? r->cur_prog : 0, p[0], op == DSR_DRAW_PROG ? p[3] : p[2], r->rs[27], r->rs[19], r->rs[20], r->rs[7], r->rs[14], r->rs[15],
+                r->tex[0], t0 ? t0->w : 0, t0 ? t0->h : 0, t0 ? t0->fmt : 0, r->tss[0][1], r->tss[0][2], r->tss[0][5], r->tss[0][6], r->rs[60], r->vp[2], r->vp[3]); break; }
+    case DSR_PRESENT: fprintf(stderr, "trace: present %u (frame %d)\n", p[0], dsr_frame); break;
+    default: break;
+    }
+}
 int dsr_renderer_exec(DSRRenderer *r, uint32_t op, const uint8_t *pl, uint32_t size)
 {
     const uint32_t *p = (const uint32_t *)pl;
+    {   static int tracing, base = -2; if (base == -2) base = getenv("DSR_TRACEBASE") ? atoi(getenv("DSR_TRACEBASE")) : -1;
+        if (tracing) trace_cmd(r, op, p, size);
+        if (op == DSR_PRESENT) {
+            if (tracing) { tracing = 0; fprintf(stderr, "trace: end\n"); }
+            else if (dsr_trace_req || dsr_frame + 1 == base) { dsr_trace_req = 0; tracing = 1; fprintf(stderr, "trace: frame %d begins\n", dsr_frame + 1); }
+        } }
     switch (op) {
     case DSR_RENDER_STATE: if (p[0] < 256) r->rs[p[0]] = p[1]; break;
     case DSR_TSS: if (p[0] < 8 && p[1] < 32) { r->tss[p[0]][p[1]] = p[2]; if (p[1] == 12) r->tss[p[0]][13] = r->tss[p[0]][14] = p[2]; } break;
@@ -725,8 +798,8 @@ int dsr_renderer_exec(DSRRenderer *r, uint32_t op, const uint8_t *pl, uint32_t s
     case DSR_CLEAR: { static int n = -1; if (n < 0) n = getenv("DSR_RTLOG") ? atoi(getenv("DSR_RTLOG")) : 0;
         Surf *t = surf(r, r->rt); if (n > 0 && t && t->kind == 3) { n--; fprintf(stderr, "dsr: clear of %u: flags %x colour %08x\n", r->rt, p[0], p[1]); } }
         clear(r, p, size); break;
-    case DSR_DRAW: draw(r, p, size); break;
-    case DSR_SET_RT: r->rt = p[0]; r->ds = p[1];
+    case DSR_DRAW: draw(r, p, size); if (r->fl_on) r->fl_ff++; break;
+    case DSR_SET_RT: if (r->fl_on && p[0] != r->rt) r->fl_rtsw++; r->rt = p[0]; r->ds = p[1];
         { static int n = -1; if (n < 0) n = getenv("DSR_RTLOG") ? atoi(getenv("DSR_RTLOG")) : 0;          // development: off-screen targets
           Surf *t = surf(r, p[0]); if (n > 0 && r->rs[28]) { n--; fprintf(stderr, "dsr: frame %d: render target %u (%ux%u) depth %u, after %ld draws\n", dsr_frame, p[0], t ? t->w : 0, t ? t->h : 0, p[1], dsr_stat[0]); } }
         break;

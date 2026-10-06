@@ -277,8 +277,14 @@ static uint32_t get_typed(Fx *f, uint32_t h, void *data, uint32_t count, int kin
 {
     int i, k0 = decode(f, h, &i);
     if (k0 == HK_ANNO) {                                   /* annotations: their number */
-        float v = (float)f->an[i].a->num; if (!count) return D3D_OK;
-        if (kind == 0) memcpy(data, &v, 4); else { int32_t x = kind == 2 ? v != 0 : (int32_t)v; memcpy(data, &x, 4); }
+        /* an int annotation holds its literal's 32 bits, as D3DX's compiler stores it: glow.fx clears its glow texture to
+         * "color = 0xFF000000", which a saturating float-to-int conversion turned into 0x7FFFFFFF (white, half alpha), and
+         * the blurred glow then turned the whole screen white whenever something glowed */
+        double num = f->an[i].a->num; if (!count) return D3D_OK;
+        int is_int = !strcasecmp(f->an[i].a->type, "int") || !strcasecmp(f->an[i].a->type, "dword") || !strcasecmp(f->an[i].a->type, "bool");
+        int32_t iv = num >= 0 ? (int32_t)(uint32_t)(uint64_t)num : (int32_t)(int64_t)num;   /* modulo 2^32 */
+        float v = is_int ? (float)iv : (float)num;
+        if (kind == 0) memcpy(data, &v, 4); else { int32_t x = kind == 2 ? num != 0 : is_int ? iv : (int32_t)(int64_t)num; memcpy(data, &x, 4); }
         return D3D_OK;
     }
     int gi, el, ne; if (!param_target(f, h, &gi, &el, &ne)) return D3DERR_INVALIDCALL;
@@ -404,7 +410,7 @@ static int build_pass(Fx *f, int k)                    /* compile a pass's progr
     if (!pr || pr->err[0]) { fprintf(stderr, "d3dx9: technique %s pass %d not built: %s\n", f->fx->t[t].name, k - f->pbase[t], pr ? pr->err : "out of memory"); hlsl_program_free(pr); f->prog[k] = ~0u; return 0; }
     uint32_t kinds = 0; for (int sl = 0; sl < 16; sl++) kinds |= (uint32_t)(pr->skind[sl] == HS_CUBE ? 1 : pr->skind[sl] == HS_3D ? 2 : 0) << (2 * sl);
     f->hp[k] = pr; f->prog[k] = d9_program_create(pr->msl, pr->msl_len, kinds);
-    if (logon()) fprintf(stderr, "d3dx9: technique %s pass %d -> program %u (%zu bytes of Metal)\n", f->fx->t[t].name, k - f->pbase[t], f->prog[k], pr->msl_len);
+    if (logon() || getenv("DSR_FLASHLOG")) fprintf(stderr, "d3dx9: technique %s pass %d -> program %u (%zu bytes of Metal)\n", f->fx->t[t].name, k - f->pbase[t], f->prog[k], pr->msl_len);
     return f->prog[k] != 0;
 }
 static int tech_valid(Fx *f, int t) { for (int p = 0; p < f->fx->t[t].npass; p++) if (!build_pass(f, f->pbase[t] + p)) return 0; return 1; }
