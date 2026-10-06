@@ -1,6 +1,6 @@
 # Multiplayer
 
-Work in progress (the `multiplayer` branch, in the Nightly app). Dungeon Siege II's multiplayer screens are switched
+Beta: in progress. Dungeon Siege II's multiplayer screens are switched
 off in the GOG 2.3 release; this port switches them back on and connects them to a replacement for GameSpy, the
 online service the game was built on (shut down in 2014).
 
