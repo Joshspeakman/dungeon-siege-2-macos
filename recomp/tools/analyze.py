@@ -113,32 +113,30 @@ while True:
         if f in funcs or not (TLO <= f < THI): continue
         funcs[f] = lift_func(f)
     if not n: break
-IS_DLL = bool(struct.unpack_from("<H", pe.data, struct.unpack_from("<I", pe.data, 0x3c)[0] + 22)[0] & 0x2000)
-for gap_round in range(256 if IS_DLL else 1):   # the executable: one pass (its analysis is verified as is)
-    nf = len(funcs)
-    covered = set()
-    for ins in funcs.values():
-        for va, i in ins.items(): covered.update(range(va, va + i.size))
-    # gaps: int3-padding-delimited candidates
-    gap_starts = []
-    va = TLO
-    while va < THI:
-        if va in covered: va += 1; continue
-        s = va
-        while va < THI and va not in covered: va += 1
-        g = code[s - TLO:va - TLO]
-        if g.strip(b'\xcc\x90'): gap_starts.append((s, va - s))
-    pad_cands = []
-    for s, n in gap_starts:
-        p = s
-        while p < s + n and code[p - TLO] in (0xcc, 0x90): p += 1
-        if p < s + n and plausible(p): pad_cands.append(p)
+# gaps between known code, after int3/nop padding: function starts no pointer or call reaches (callbacks found only at
+# run time, catch handlers, code after tables); repeated until nothing new turns up. Coverage is kept in a byte map.
+cov = bytearray(THI - TLO)
+def mark(ins):
+    for va, i in ins.items(): cov[va - TLO:va - TLO + i.size] = b'\x01' * i.size
+for ins in funcs.values(): mark(ins)
+for gap_round in range(256):
+    nf = len(funcs); pad_cands = []; pos = 0
+    while True:
+        s = cov.find(0, pos)
+        if s < 0: break
+        e = cov.find(1, s); e = len(cov) if e < 0 else e
+        g = code[s:e]; p = 0
+        while p < len(g) and g[p] in (0xcc, 0x90): p += 1
+        if p < len(g) and plausible(TLO + s + p): pad_cands.append(TLO + s + p)
+        pos = e
     for p in pad_cands:
         if p not in funcs: ptrsrc[p] = 'gap'; work.append(p)
+    new_f = []
     while work:
         f = work.pop()
         if f in funcs or not (TLO <= f < THI): continue
-        funcs[f] = lift_func(f)
+        funcs[f] = lift_func(f); new_f.append(f)
+    for f in new_f: mark(funcs[f])
     if len(funcs) == nf: break
 covered = set(); mix = collections.Counter(); m80 = []; seh_set = []; seh_push = []; raise_calls = []
 for f, ins in funcs.items():
