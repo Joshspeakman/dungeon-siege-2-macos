@@ -9,7 +9,7 @@ committed.
 | Step | State |
 |---|---|
 | Survey of the GOG 2.3 release | done: see `LLM-Decomp-Guides/dungeon-siege-2` |
-| Analysis (`recomp/tools/analyze.py`) | 58,856 functions, 88.9% of `.text` (DS1 reached 99.7% after tuning) |
+| Analysis (`recomp/tools/analyze.py`) | 85,833 functions, 97.1% of `.text` (gap scanning repeated until nothing new; 479 jump tables resolved) |
 | Lifting (`recomp/tools/lift.py`) | all functions lifted, 0 internal errors; ~1,000 unsupported instructions, almost all SSE2 C-runtime paths a CPU without SSE2 skips, or data decoded as code; `lock cmpxchg` added |
 | Multi-image build (`recomp/build.sh`) | the game plus Miles (`mss32.dll`, `msssoft.m3d`, `mssmp3.asi`, `mssdsp.flt`) and Bink: 62,226 functions, compiles and links in about 4 minutes |
 | Windows imports | 517 imported; DS1's runtime covered 345, `ds2_imports.c` adds the rest except Direct3D 9/D3DX (stubs) and Winsock |
@@ -26,7 +26,7 @@ committed.
 | 2 | ~~D3DX texture loading~~ | done (DDS/TGA/BMP); PNG/JPEG not yet (not seen so far) |
 | 3 | **Shaders and effects** (optional now: with the Radeon 8500-class identity the game falls back to fixed function when `D3DXCreateEffect` fails, and renders the world, characters and UI) | 12 effect files (SM 1.1/2.0 HLSL). Start with effects reported unsupported (the game should fall back), then translate. Options: vkd3d-shader (LGPL) at install time, or a small HLSL-subset → MSL translator. |
 | 4 | **C++ exceptions** | ~1,400 functions with try blocks: catch continuations in the lifter/runtime (extends DS1's `__except` landing pads). Needed as soon as the game throws in normal play. |
-| 5 | Analysis coverage, unresolved jump tables (49) | as in DS1. |
+| 5 | Analysis coverage: 97.1%; 73 jump tables still bounded heuristically | as in DS1. |
 | 6 | Text rendering (GDI glyphs), Winsock, audio check, movies | |
 | 7 | Launcher, installer, updater, app bundle (from DS1) | |
 | 8 | Multiplayer (LAN / direct IP; GameSpy is gone), performance, hardening | |
