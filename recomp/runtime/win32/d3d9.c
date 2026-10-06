@@ -639,22 +639,30 @@ void d9_program_consts(Dev9 *d, const float *regs, int nregs)
     (void)d; if (nregs <= 0) return; if (nregs > 4096) nregs = 4096;
     uint32_t *p = cmd_begin(DSR_PROG_CONST, 4 + 16 * (uint32_t)nregs); p[0] = (uint32_t)nregs; memcpy(p + 1, regs, 16 * (size_t)nregs); cmd_end();
 }
-typedef struct D9Saved { uint32_t rs[256], tss[8][33], ss[16][14]; Tex9 *tex[16]; uint32_t prog; } D9Saved;
-void *d9_state_save(Dev9 *d)
+/* Only the states the technique sets are saved and put back: the game changes other states between Begin and End and
+ * keeps its own record of them, which a restore of everything would contradict (the scene then drawn with a stale
+ * texture factor: all white, or flashing green). */
+typedef struct D9Saved { D9Mask m; uint32_t rs[256], tss[8][33], ss[16][14]; Tex9 *tex[16]; uint32_t prog; } D9Saved;
+void *d9_state_save(Dev9 *d, const D9Mask *m)
 {
-    D9Saved *s = malloc(sizeof *s); memcpy(s->rs, d->rs, sizeof s->rs); memcpy(s->tss, d->tss, sizeof s->tss); memcpy(s->ss, d->ss, sizeof s->ss);
-    for (int k = 0; k < 16; k++) { s->tex[k] = d->tex[k]; if (s->tex[k]) s->tex[k]->ref++; }
+    D9Saved *s = malloc(sizeof *s); s->m = *m; memcpy(s->rs, d->rs, sizeof s->rs); memcpy(s->tss, d->tss, sizeof s->tss); memcpy(s->ss, d->ss, sizeof s->ss);
+    for (int k = 0; k < 16; k++) { s->tex[k] = m->tex[k] ? d->tex[k] : NULL; if (s->tex[k]) s->tex[k]->ref++; }
     s->prog = d->prog; return s;
 }
 static void set_rs(Dev9 *d, uint32_t s, uint32_t v); static void set_tss(Dev9 *d, uint32_t st, uint32_t t, uint32_t v); static void set_ss(Dev9 *d, uint32_t sm, uint32_t t, uint32_t v); static void set_tex(Dev9 *d, uint32_t st, Tex9 *t);
 void d9_state_restore(Dev9 *d, void *saved)
 {
     D9Saved *s = saved; if (!s) return;
-    for (uint32_t k = 0; k < 256; k++) if (d->rs[k] != s->rs[k]) set_rs(d, k, s->rs[k]);
-    for (uint32_t st = 0; st < 8; st++) for (uint32_t t = 0; t < 33; t++) if (d->tss[st][t] != s->tss[st][t]) set_tss(d, st, t, s->tss[st][t]);
-    for (uint32_t sm = 0; sm < 16; sm++) for (uint32_t t = 0; t < 14; t++) if (d->ss[sm][t] != s->ss[sm][t]) set_ss(d, sm, t, s->ss[sm][t]);
-    for (uint32_t k = 0; k < 16; k++) { if (d->tex[k] != s->tex[k]) set_tex(d, k, s->tex[k]); if (s->tex[k]) tex_release(s->tex[k]); }
-    d9_program_use(d, s->prog); free(s);
+    const D9Mask *m = &s->m;
+    { static int lg = -1; if (lg < 0) lg = getenv("D3D9_FXSTATELOG") ? 40 : 0;    /* development: what a full restore would have undone */
+      if (lg > 0) for (uint32_t k = 0; k < 256; k++) if (!m->rs[k] && d->rs[k] != s->rs[k] && lg > 0) { lg--; fprintf(stderr, "d3d9: the game changed render state %u (%08x -> %08x) inside an effect\n", k, s->rs[k], d->rs[k]); }
+      if (lg > 0) for (uint32_t st = 0; st < 8; st++) for (uint32_t t = 0; t < 33; t++) if (!m->tss[st][t] && d->tss[st][t] != s->tss[st][t] && lg > 0) { lg--; fprintf(stderr, "d3d9: the game changed stage %u state %u (%u -> %u) inside an effect\n", st, t, s->tss[st][t], d->tss[st][t]); } }
+    for (uint32_t k = 0; k < 256; k++) if (m->rs[k] && d->rs[k] != s->rs[k]) set_rs(d, k, s->rs[k]);
+    for (uint32_t st = 0; st < 8; st++) for (uint32_t t = 0; t < 33; t++) if (m->tss[st][t] && d->tss[st][t] != s->tss[st][t]) set_tss(d, st, t, s->tss[st][t]);
+    for (uint32_t sm = 0; sm < 16; sm++) for (uint32_t t = 0; t < 14; t++) if (m->ss[sm][t] && d->ss[sm][t] != s->ss[sm][t]) set_ss(d, sm, t, s->ss[sm][t]);
+    for (uint32_t k = 0; k < 16; k++) if (m->tex[k]) { if (d->tex[k] != s->tex[k]) set_tex(d, k, s->tex[k]); if (s->tex[k]) tex_release(s->tex[k]); }
+    if (m->prog) d9_program_use(d, s->prog);
+    free(s);
 }
 int d9_shaders_on(void) { static int on = -1; if (on < 0) { const char *e = getenv("DS2_SHADERS"); on = !(e && !strcmp(e, "0")); } return on; }
 
