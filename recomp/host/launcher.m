@@ -5,6 +5,7 @@
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #import <ImageIO/ImageIO.h>
+#include <CommonCrypto/CommonDigest.h>
 #include <zlib.h>
 #include <arpa/inet.h>
 #include <ifaddrs.h>
@@ -295,6 +296,61 @@ static NSArray<NSDictionary *> *framerate_choices(void)
     [a addObject:@{@"value": @"unlimited", @"label": @"Unlimited", @"note": @"No cap and no vertical sync (may tear)"}];
     return a;
 }
+/* ---- the CD key for online play ----
+ * The game presents a "DoubleHash" of the player's product key to the GameSpy (now OpenSpy) lobby. The retail
+ * installer derived it from the key; digital releases never ran that installer. As its Setup.exe does: the 25
+ * characters read as a base-24 number over BCDFGHJKMPQRTVWXY2346789 into 15 little-endian bytes, SHA-1 of those,
+ * SHA-1 of the digest, the first 8 bytes. Only the hash is stored (<data>/cdkey-hash.txt; the runtime puts it in the
+ * registry, registry.c), never the key. Same computation as install.sh --cd-key. */
+static BOOL cdkey_hash(NSString *key, uint8_t out[8])
+{
+    static const char A[] = "BCDFGHJKMPQRTVWXY2346789";
+    NSString *k = [[[key uppercaseString] stringByReplacingOccurrencesOfString:@"-" withString:@""] stringByReplacingOccurrencesOfString:@" " withString:@""];
+    if (k.length != 25) return NO;
+    uint8_t buf[15] = {0}; int top = 0;
+    for (NSUInteger i = 0; i < 25; i++) {
+        unichar ch = [k characterAtIndex:i]; const char *p = ch < 128 ? strchr(A, (char)ch) : NULL;
+        if (!p || !ch) return NO;
+        unsigned c = (unsigned)(p - A);
+        for (int j = 0; j <= top; j++) { unsigned v = buf[j] * 24u + c; buf[j] = (uint8_t)v; c = v >> 8; }
+        if (c) { if (top + 1 >= 15) return NO; buf[++top] = (uint8_t)c; }
+    }
+    uint8_t d1[CC_SHA1_DIGEST_LENGTH], d2[CC_SHA1_DIGEST_LENGTH];
+    CC_SHA1(buf, sizeof buf, d1); CC_SHA1(d1, sizeof d1, d2);
+    memcpy(out, d2, 8); return YES;
+}
+static NSString *cdkey_path(NSString *data) { return [data stringByAppendingPathComponent:@"cdkey-hash.txt"]; }
+static BOOL cdkey_present(NSString *data) { return [NSFileManager.defaultManager fileExistsAtPath:cdkey_path(data)]; }
+static NSArray<NSDictionary *> *cdkey_choice(NSString *data)
+{
+    return cdkey_present(data) ? @[@{@"value": @"set", @"label": @"CD Key Entered", @"note": @"Online play ready · press to change it"}]
+                               : @[@{@"value": @"none", @"label": @"No CD Key", @"note": @"Needed for online play · press to enter your own"}];
+}
+/* the entry box; returns YES when the stored key changed */
+static BOOL cdkey_panel(NSString *data)
+{
+    for (NSString *problem = nil;;) {
+        NSAlert *a = [NSAlert new];
+        a.messageText = problem ?: @"Your Dungeon Siege II CD Key";
+        a.informativeText = @"The 25-character product key of your own copy (on the disc case or in your store account), for online play. "
+                             "Each copy needs its own key: the same key can't be online twice at once. Only a hash of it is kept on this Mac.";
+        NSSecureTextField *f = [[NSSecureTextField alloc] initWithFrame:NSMakeRect(0, 0, 320, 24)];
+        f.placeholderString = @"XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"; a.accessoryView = f;
+        [a addButtonWithTitle:@"Save"]; [a addButtonWithTitle:@"Cancel"];
+        BOOL had = cdkey_present(data); if (had) [a addButtonWithTitle:@"Remove Key"];
+        a.window.initialFirstResponder = f;
+        NSModalResponse r = [a runModal];
+        if (r == NSAlertSecondButtonReturn) return NO;
+        if (r == NSAlertThirdButtonReturn) { [NSFileManager.defaultManager removeItemAtPath:cdkey_path(data) error:nil]; return YES; }
+        uint8_t h[8];
+        if (!cdkey_hash(f.stringValue, h)) { problem = @"That isn't a product key: it has 25 letters and digits (no vowels, 0, 1 or 5)."; continue; }
+        NSMutableString *hex = [NSMutableString string]; for (int i = 0; i < 8; i++) [hex appendFormat:@"%02x", h[i]];
+        [NSFileManager.defaultManager createDirectoryAtPath:data withIntermediateDirectories:YES attributes:nil error:nil];
+        [[hex stringByAppendingString:@"\n"] writeToFile:cdkey_path(data) atomically:YES encoding:NSASCIIStringEncoding error:nil];
+        [NSFileManager.defaultManager setAttributes:@{NSFilePosixPermissions: @0600} ofItemAtPath:cdkey_path(data) error:nil];
+        return YES;
+    }
+}
 static NSInteger index_of(NSArray<NSDictionary *> *c, NSString *v, NSInteger dflt)
 {
     for (NSUInteger k = 0; k < c.count; k++) if ([c[k][@"value"] isEqualToString:v ?: @""]) return (NSInteger)k;
@@ -435,7 +491,10 @@ int ds_launcher_run(const char *game_dir, const char *data_dir)
     __block int ustate = updater ? UPD_CHECKING : UPD_NONE; __block NSString *latest = nil;
     upd.choices = update_choice(ustate, branch, built, nil);
     BOOL shotMode = shot != NULL;
-    NSArray<DSRow *> *rows = @[res, fps, upd];
+    DSRow *online = [DSRow new]; online.title = @"Online"; online.choices = cdkey_choice(data);
+    __weak DSRow *wo = online;
+    online.activate = ^{ if (cdkey_panel(data)) wo.choices = cdkey_choice(data); };
+    NSArray<DSRow *> *rows = @[res, fps, online, upd];
     DSLaunchView *v = [[DSLaunchView alloc] initWithFrame:NSMakeRect(0, 0, 780, 700 + 74 * (NSInteger)(rows.count - 5))];
     v.rows = rows; v.hover = v.pressed = HIT_NONE;
     __weak DSLaunchView *wv = v; __weak DSRow *wu = upd;

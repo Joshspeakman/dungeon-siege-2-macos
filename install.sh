@@ -5,7 +5,11 @@
 #                                      disc case) and stores what the retail installer would have derived from it (the
 #                                      "DoubleHash" the game presents to the GameSpy/OpenSpy lobby) in the data folder.
 #                                      The key itself is not stored. Without it, multiplayer stops at "Could not find a
-#                                      valid CDKey". DS2_CDKEY=<key> gives it without the prompt.
+#                                      valid CDKey". DS2_CDKEY=<key> gives it without the prompt. The launch window
+#                                      has the same entry (Online row), and a first install offers it at the end.
+# install.sh --cd-key --reg-file <file.reg>   the same for a Windows (or Wine/Proton) player: writes a .reg file
+#                                      to import there (double-click it), so a PC copy without the retail installer
+#                                      can join the same online games. Nothing on this Mac changes.
 # install.sh --nightly                 installs "Dungeon Siege II Nightly.app" next to the stable app: the newest
 #                                      experimental work (the repository's nightly branch, fetched from GitHub and
 #                                      built in build/nightly; this checkout is left as it is). It shares the data
@@ -20,13 +24,14 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GAME=""; GOG_EXE=""; APPS="$HOME/Applications"; DATA="$HOME/Games/DungeonSiege2Native"
-NIGHTLY=""; AS_NIGHTLY=""; CDKEY=""; ARGS=()
+NIGHTLY=""; AS_NIGHTLY=""; CDKEY=""; REGFILE=""; ARGS=()
 GOG_SHA=c17e1cc9e01b5d2439a92e06b905040379ad4bb8618b822582c46f5fa29db4e2
 while [ $# -gt 0 ]; do
   case "$1" in --nightly) NIGHTLY=1; shift; continue;; --as-nightly) AS_NIGHTLY=1; shift; continue;; --cd-key) CDKEY=1; shift; continue;; esac
   ARGS+=("$1"); [ $# -gt 1 ] && case "$1" in --*) case "$2" in --*) ;; *) ARGS+=("$2");; esac;; esac
   case "$1" in
     --game-dir) GAME="$2"; shift 2;; --gog-installer) GOG_EXE="$2"; shift 2;; --app-dir) APPS="$2"; shift 2;; --data-dir) DATA="$2"; shift 2;;
+    --reg-file) REGFILE="$2"; shift 2;;
     *) echo "unknown option $1"; exit 1;;
   esac
 done
@@ -40,13 +45,12 @@ installed_game() {     # the game folder an installed app was set up with (for r
     if [ -n "$v" ]; then eval "x=$v"; printf '%s\n' "$x"; return 0; fi
   done; return 0
 }
-# --cd-key: the retail installer's DoubleHash of the player's product key: the key's 25 characters (alphabet
-# BCDFGHJKMPQRTVWXY2346789) read as a base-24 number into 15 little-endian bytes, SHA-1 of that, SHA-1 of the digest,
-# the first 8 bytes (as the installer's Setup.exe computes it)
-if [ -n "$CDKEY" ]; then
-  K="${DS2_CDKEY:-}"; if [ -z "$K" ]; then printf 'Product key (25 characters, dashes optional): '; IFS= read -rs K; echo; fi
-  mkdir -p "$DATA"
-  DS2_CDKEY="$K" python3 - "$DATA/cdkey-hash.txt" <<'PY' || exit 1
+# The CD key for online play: the retail installer's "DoubleHash" of the player's product key (the key's 25 characters,
+# alphabet BCDFGHJKMPQRTVWXY2346789, read as a base-24 number into 15 little-endian bytes; SHA-1 of that, SHA-1 of the
+# digest, the first 8 bytes, as its Setup.exe computes it). store_cdkey <key> <out> [reg]: the 16 hex digits into the
+# data folder's cdkey-hash.txt, or (reg) a .reg file for a Windows player. Only the hash is ever written.
+store_cdkey() {
+  DS2_CDKEY="$1" python3 - "$2" "${3:-}" <<'PY'
 import hashlib, os, sys
 A = "BCDFGHJKMPQRTVWXY2346789"; key = os.environ["DS2_CDKEY"].upper().replace("-", "").replace(" ", "")
 if len(key) != 25 or any(c not in A for c in key): sys.exit("That is not a product key: 25 characters from " + A + ".")
@@ -57,10 +61,27 @@ for ch in key:
         v = buf[i] * 24 + c; buf[i] = v & 255; c = v >> 8
     if c: top += 1; buf[top] = c
 h = hashlib.sha1(hashlib.sha1(bytes(buf)).digest()).digest()[:8]
-with open(sys.argv[1], "w") as f: f.write(h.hex() + "\n")
-os.chmod(sys.argv[1], 0o600)
-print("== CD key stored for multiplayer (only its hash) in " + sys.argv[1])
+if sys.argv[2] == "reg":
+    hx = ",".join("%02x" % b for b in h); out = ["REGEDIT4", ""]
+    for k in ("SOFTWARE\\Wow6432Node\\Microsoft\\Microsoft Games\\DungeonSiege2", "SOFTWARE\\Microsoft\\Microsoft Games\\DungeonSiege2"):
+        out += ["[HKEY_LOCAL_MACHINE\\" + k + "]", '"DoubleHash"=hex:' + hx, ""]
+    open(sys.argv[1], "w", newline="\r\n").write("\n".join(out))
+    print("== wrote " + sys.argv[1] + ": import it on the PC (double-click, or regedit /s) to play online with this key")
+else:
+    with open(sys.argv[1], "w") as f: f.write(h.hex() + "\n")
+    os.chmod(sys.argv[1], 0o600)
+    print("== CD key stored for online play (only its hash) in " + sys.argv[1])
 PY
+}
+ask_cdkey() {   # $1: prompt prefix; reads the key without echoing it
+  local K="${DS2_CDKEY:-}"
+  if [ -z "$K" ]; then printf '%s' "$1" >&2; IFS= read -rs K; echo >&2; fi   # the prompt on stderr: stdout is the key
+  printf '%s' "$K"
+}
+if [ -n "$CDKEY" ]; then
+  K="$(ask_cdkey 'Product key (25 characters, dashes optional): ')"
+  if [ -n "$REGFILE" ]; then store_cdkey "$K" "$REGFILE" reg || exit 1; exit 0; fi
+  mkdir -p "$DATA"; store_cdkey "$K" "$DATA/cdkey-hash.txt" || exit 1
   [ -n "$GAME$GOG_EXE" ] || exit 0
 fi
 # --nightly: fetch the nightly branch into build/nightly and let its own install.sh install the nightly app
@@ -169,3 +190,10 @@ rm -rf "$I"
 codesign --force --deep --sign - "$A" >/dev/null 2>&1 || true
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$A" 2>/dev/null || true
 echo "== done: $A (data in $DATA)"
+# online play needs the player's own CD key: offered once, on an interactive install (not by the launcher's updater)
+if [ ! -f "$DATA/cdkey-hash.txt" ] && [ -t 0 ] && [ -z "$AS_NIGHTLY$CDKEY" ]; then
+  echo "== Online play needs your own Dungeon Siege II CD key (25 characters, on the disc case). Press Return to skip;"
+  echo "   you can add it later in the launch window (Online) or with ./install.sh --cd-key."
+  K="$(ask_cdkey 'Product key: ')"
+  [ -n "$K" ] && { store_cdkey "$K" "$DATA/cdkey-hash.txt" || echo "   (not stored; try again from the launch window)"; }
+fi
