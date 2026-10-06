@@ -10,7 +10,10 @@ online service the game was built on (shut down in 2014).
 - **The lobby:** the game signs in to [OpenSpy](https://openspy.net), the community-run GameSpy replacement, and shows
   its party selection, game list and chat rooms. Dungeon Siege II goes through this lobby for every kind of game,
   LAN games included.
-- **Not tested yet:** hosting and joining a game, and play between a Mac and a PC.
+- **Parties and portals:** creating a multiplayer party in the lobby works, and the portal list (OpenSpy's rooms,
+  with their player and game counts) comes up.
+- **Not tested yet:** hosting and joining a game (needs two machines), and play between a Mac and a PC. Importing a
+  single-player hero as a party has only been tried by scripted input, which can't double-click the list.
 
 ## Your CD key
 
