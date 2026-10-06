@@ -1,4 +1,4 @@
-/* WSOCK32 (the host name and addresses the multiplayer screens use) and OLE32 basics. */
+/* WSOCK32 host name and addresses (what the multiplayer screens show) and OLE32 basics (DirectPlay 8 objects from dpnet.c). */
 #include "w32.h"
 #include <arpa/inet.h>
 #include <ifaddrs.h>
@@ -37,6 +37,9 @@ IMPL(wsock32, ord52)
             freeifaddrs(ifs);
         }
         if (!n) addrs[n++] = htonl(INADDR_LOOPBACK);
+        uint32_t portmap_public_ip(void); uint32_t pub = getenv("DS_NO_PORTMAP") ? 0 : portmap_public_ip();   /* for internet players */
+        int dup = 0; for (int i = 0; i < n; i++) if (addrs[i] == pub) dup = 1;
+        if (pub && !dup && n < 16) { memmove(addrs + 1, addrs, sizeof *addrs * (size_t)n); addrs[0] = pub; n++; }   /* first: the one to give out */
     } else {
         struct addrinfo hint = {0}, *res = 0; hint.ai_family = AF_INET;
         if (getaddrinfo(name, 0, &hint, &res)) RET(0, 1);
@@ -68,6 +71,9 @@ IMPL(ole32, CoUninitialize) { RET(0, 0); }
 IMPL(ole32, CoCreateInstance)
 {
     uint32_t clsid = ARG(0), out = ARG(4);
+    uint32_t w32_dpnet_create(uint32_t clsid_first_dword);
+    uint32_t obj = w32_dpnet_create(rt_r32(G_MEM, clsid));           /* DirectPlay 8 client, server, address */
+    if (obj) { if (out) rt_w32(G_MEM, out, obj); RET(0, 5); }
     const uint8_t *g = GP(clsid);
     fprintf(stderr, "w32: CoCreateInstance({%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}) -> class not registered\n", rt_r32(G_MEM, clsid),
             rt_r16(G_MEM, clsid + 4), rt_r16(G_MEM, clsid + 6), g[8], g[9], g[10], g[11], g[12], g[13], g[14], g[15]);

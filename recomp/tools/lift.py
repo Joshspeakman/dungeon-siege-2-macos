@@ -27,7 +27,8 @@ JUNK = {'in', 'out', 'insb', 'insd', 'insw', 'outsb', 'outsd', 'outsw', 'iretd',
 
 # Functions a native implementation can take over (runtime/win32/hooks.c rt_override): at the function's first
 # instruction the runtime may perform the whole call (including the return) itself.
-OVERRIDES = {             # address: description (runtime/win32/hooks.c rt_override); none yet for Dungeon Siege II
+OVERRIDES = {             # address: description (runtime/win32/hooks.c rt_override)
+    0x007663b0: 'UIButton::DisableButton: the main menu keeps its Multiplayer button (GOG 2.3 disables it)',
 }
 
 class Unsupported(Exception): pass
