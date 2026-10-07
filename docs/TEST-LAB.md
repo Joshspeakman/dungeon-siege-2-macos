@@ -8,7 +8,7 @@ the Mac version shares its content reader and its commands (`recomp/host/test_la
 
 ## Starting it
 
-Press **TEST LAB** in the launch window. The game opens in an ordinary window on the left of the screen, with the
+Choose **Test Lab** in the launch window's Game row and press **Play**. The game opens in an ordinary window on the left of the screen, with the
 Test Lab's window on the right. Load a single-player save through the game's Single Player menu (or create a
 character), then **Prepare hero / unlock skills**.
 
@@ -73,7 +73,7 @@ path, clean-up, and travel to the Azunite Shrine of Life, Snowbrook Mountain and
 answered and did what they said. The fire, ice and lightning effects, the snow and the glowing teleporter pylons drew
 correctly. Once, a frame taken just after the first lightning blast showed the whole world white (the interface was
 fine); it did not happen again in three repeats of the same casts: if you see a white flash with a spell, mark it
-with a note. The lab's window itself (the launcher's button) has not been tried by hand yet.
+with a note. The lab's window itself (the launcher's Test Lab entry) has not been tried by hand yet.
 
 ## From a terminal
 
@@ -88,7 +88,7 @@ DS_GAME_DIR="/path/to/Dungeon Siege 2" python3 $T send $LAB cast spells <templat
 
 ## How it works
 
-`DS_TEST_LAB=1` (set by the launcher's Test Lab button) registers a few functions with the game's script binder
+`DS_TEST_LAB=1` (set when the launcher starts the Test Lab) registers a few functions with the game's script binder
 (FuBi) before the engine starts, and the game thread checks `<lab data>/lab/request` up to five times a second from
 its message loop, running the request through the game's own Skrit compiler, so objects, spells and travel follow the
 normal engine paths (`recomp/runtime/win32/test_lab.c`). One request at a time; an unanswered request is reported as
