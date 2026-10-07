@@ -198,7 +198,8 @@ static void cmdfile_poll(uint32_t fno)
 }
 /* DS_PEEKFILE=<path> (test mode): "7a05fc,a8,13" lines appended to the file are read like the "peek" command, on a
  * thread of their own: game memory can be looked at while the game shows no frames (a stall). "watch:<chain>" resolves
- * the chain to an address, then reports each change of the dword there with the lifted function the game thread was in */
+ * the chain to an address, then reports each change of the dword there with the lifted functions on the game thread's
+ * stack; "<chain>=<hex>" writes the dword (experiments) */
 static pthread_t game_pt;
 static void *peek_thread(void *arg)
 {
@@ -229,6 +230,8 @@ static void *peek_thread(void *arg)
             pos += (off_t)l; line[l - 1] = 0;
             int w = !strncmp(line, "watch:", 6); char *e = line + (w ? 6 : 0); uint32_t at = (uint32_t)strtoul(e, &e, 16), v = 0;
             for (;;) { if (at < 0x10000u) { v = 0; break; } memcpy(&v, G_MEM + at, 4); if (*e != ',') break; at = v + (uint32_t)strtoul(e + 1, &e, 16); }
+            if (*e == '=' && at >= 0x10000u) { uint32_t nv = (uint32_t)strtoul(e + 1, 0, 16); memcpy(G_MEM + at, &nv, 4);   /* "<chain>=<hex>": write */
+                fprintf(stderr, "DungeonSiegeNative: poke %08x = 0x%08x (was 0x%08x)\n", at, nv, v); continue; }
             if (w && at >= 0x10000u && nwatch < 8) { watch_at[nwatch] = at; watch_v[nwatch++] = v; fprintf(stderr, "DungeonSiegeNative: watching %08x (now 0x%08x)\n", at, v); continue; }
             fprintf(stderr, "DungeonSiegeNative: peek %s = 0x%08x (byte 0x%02x)\n", line, v, v & 0xff);
         }
