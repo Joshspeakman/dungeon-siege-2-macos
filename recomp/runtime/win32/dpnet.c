@@ -15,7 +15,7 @@ enum { S_OK_ = 0, E_NOINTERFACE_ = 0x80004002u, E_POINTER_ = 0x80004003u, DPNERR
 static const uint8_t GUID_TCPIP[16] = {0xa0, 0x7b, 0xfe, 0xeb, 0x8d, 0x62, 0xd2, 0x11, 0xae, 0x0f, 0x00, 0x60, 0x97, 0xb0, 0x14, 0x11};   /* CLSID_DP8SP_TCPIP */
 
 /* ---- objects: a guest block {vtable, kind, index} ---- */
-enum { K_CLIENT = 1, K_SERVER, K_ADDRESS };
+enum { K_CLIENT = 1, K_SERVER, K_ADDRESS, K_THREADPOOL };
 typedef struct Comp { char name[64]; uint32_t type; uint8_t *data; uint32_t size; } Comp;
 typedef struct Obj {
     int used, kind, refs; uint32_t g;              /* guest object */
@@ -24,7 +24,7 @@ typedef struct Obj {
     uintptr_t context_sess;                        /* client/server: the Sess */
 } Obj;
 static Obj objs[256]; static pthread_mutex_t olock = PTHREAD_MUTEX_INITIALIZER;
-static uint32_t vt[4];
+static uint32_t vt[5];
 static Obj *O(uint32_t g) { uint32_t k = g ? rt_r32(G_MEM, g + 8) : 999; return k < 256 && objs[k].used && objs[k].g == g ? &objs[k] : 0; }
 static uint32_t obj_new(int kind)
 {
@@ -1232,6 +1232,12 @@ STUB(cs_RegisterLobby, 4, S_OK_) STUB(sv_CreateGroup, 6, DPNERR_UNSUPPORTED)
 STUB(sv_DestroyGroup, 5, DPNERR_UNSUPPORTED) STUB(sv_AddPlayerToGroup, 6, DPNERR_UNSUPPORTED) STUB(sv_RemovePlayerFromGroup, 6, DPNERR_UNSUPPORTED)
 STUB(sv_SetGroupInfo, 6, DPNERR_UNSUPPORTED) STUB(sv_GetGroupInfo, 5, DPNERR_UNSUPPORTED) STUB(sv_EnumGroupMembers, 5, DPNERR_UNSUPPORTED)
 STUB(sv_GetGroupContext, 4, DPNERR_UNSUPPORTED)
+/* IDirectPlay8ThreadPool: the game creates one before its client or server (a failure stops hosting). Messages are
+ * delivered on this DirectPlay's own dispatcher thread, as with DirectPlay's default worker threads, so there is no work
+ * for DoWork to do; GetThreadCount reports that one thread */
+static void tp_GetThreadCount(Ctx *c) { dump_args("ThreadPool.GetThreadCount", c, 4); if (ARG(2)) rt_w32(G_MEM, ARG(2), 1); RET(S_OK_, 4); }
+STUB(tp_Initialize, 4, S_OK_) STUB(tp_Close, 2, S_OK_) STUB(tp_SetThreadCount, 4, S_OK_)
+static void tp_DoWork(Ctx *c) { RET(S_OK_, 3); }
 
 static uint32_t vtable(const char *iface, void (*const *fns)(Ctx *), int n)
 {
@@ -1253,16 +1259,19 @@ static void init_vtables(void)
     static void (*const ad[])(Ctx *) = { a_QueryInterface, a_AddRef, a_Release, a_BuildFromURLW, a_BuildFromURLA, a_Duplicate, a_SetEqual,
         a_IsEqual, a_Clear, a_GetURLW, a_GetURLA, a_GetSP, a_GetUserData, a_SetSP, a_SetUserData, a_GetNumComponents,
         a_GetComponentByName, a_GetComponentByIndex, a_AddComponent, a_GetDevice, a_SetDevice, a_BuildFromDirectPlay4Address };
-    _Static_assert(sizeof cl / sizeof *cl == 22 && sizeof sv / sizeof *sv == 34 && sizeof ad / sizeof *ad == 22, "vtable sizes");
+    static void (*const tp[])(Ctx *) = { a_QueryInterface, a_AddRef, a_Release, tp_Initialize, tp_Close, tp_GetThreadCount, tp_SetThreadCount, tp_DoWork };
+    _Static_assert(sizeof cl / sizeof *cl == 22 && sizeof sv / sizeof *sv == 34 && sizeof ad / sizeof *ad == 22 && sizeof tp / sizeof *tp == 8, "vtable sizes");
     vt[K_CLIENT] = vtable("IDirectPlay8Client", cl, 22); vt[K_SERVER] = vtable("IDirectPlay8Server", sv, 34); vt[K_ADDRESS] = vtable("IDirectPlay8Address", ad, 22);
+    vt[K_THREADPOOL] = vtable("IDirectPlay8ThreadPool", tp, 8);
 }
-/* ole32 CoCreateInstance for the DirectPlay 8 classes; returns 0 if the class is not one of ours */
+/* ole32 CoCreateInstance for the DirectPlay 8 classes (client, server, address, thread pool); returns 0 if the class is not one of ours */
 uint32_t w32_dpnet_create(uint32_t clsid_first_dword)
 {
-    int kind = clsid_first_dword == 0x743f1dc6u ? K_CLIENT : clsid_first_dword == 0xda825e1bu ? K_SERVER : clsid_first_dword == 0x934a9523u ? K_ADDRESS : 0;
+    int kind = clsid_first_dword == 0x743f1dc6u ? K_CLIENT : clsid_first_dword == 0xda825e1bu ? K_SERVER : clsid_first_dword == 0x934a9523u ? K_ADDRESS
+             : clsid_first_dword == 0xfc47060eu ? K_THREADPOOL : 0;
     if (!kind) return 0;
     init_vtables();
     uint32_t g = obj_new(kind);
-    LOG("CoCreateInstance -> %s %08x\n", kind == K_CLIENT ? "client" : kind == K_SERVER ? "server" : "address", g);
+    LOG("CoCreateInstance -> %s %08x\n", kind == K_CLIENT ? "client" : kind == K_SERVER ? "server" : kind == K_ADDRESS ? "address" : "thread pool", g);
     return g;
 }

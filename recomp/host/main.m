@@ -9,6 +9,8 @@
 #define DS_BUILD "dev"
 #endif
 #include <pthread.h>
+#include <dlfcn.h>
+#include <mach/mach.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <mach/mach_time.h>
@@ -194,6 +196,46 @@ static void cmdfile_poll(uint32_t fno)
     }
     fclose(f);
 }
+/* DS_PEEKFILE=<path> (test mode): "7a05fc,a8,13" lines appended to the file are read like the "peek" command, on a
+ * thread of their own: game memory can be looked at while the game shows no frames (a stall). "watch:<chain>" resolves
+ * the chain to an address, then reports each change of the dword there with the lifted function the game thread was in */
+static pthread_t game_pt;
+static void *peek_thread(void *arg)
+{
+    const char *path = arg; off_t pos = 0; char line[256]; extern uint8_t *G_MEM;
+    uint32_t watch_at[8]; uint32_t watch_v[8]; int nwatch = 0;
+    for (int tick = 0;; tick++) {
+        for (int k = 0; k < nwatch; k++) {
+            uint32_t v; memcpy(&v, G_MEM + watch_at[k], 4); if (v == watch_v[k]) continue;
+            mach_port_t th = pthread_mach_thread_np(game_pt); arm_thread_state64_t st; mach_msg_type_number_t n = ARM_THREAD_STATE64_COUNT;
+            uintptr_t pcs[64]; int npc = 0;   /* only raw reads while the game thread is stopped: it may hold a lock dladdr needs */
+            thread_suspend(th);
+            if (!thread_get_state(th, ARM_THREAD_STATE64, (thread_state_t)&st, &n)) {
+                uintptr_t fp = (uintptr_t)arm_thread_state64_get_fp(st); pcs[npc++] = (uintptr_t)arm_thread_state64_get_pc(st);
+                while (npc < 64 && fp && !(fp & 7)) { uintptr_t *f = (uintptr_t *)fp; if (!f[1]) break; pcs[npc++] = f[1]; fp = f[0]; }
+            }
+            thread_resume(th);
+            fprintf(stderr, "DungeonSiegeNative: watch %08x: 0x%08x -> 0x%08x in", watch_at[k], watch_v[k], v); const char *last = "";
+            for (int d = 0; d < npc; d++) { Dl_info di = {0}; dladdr((void *)pcs[d], &di); const char *nm = di.dli_sname ? di.dli_sname : "?";
+                if (!strncmp(nm, "f_", 2) && strcmp(nm, last)) { fprintf(stderr, " %s", nm + 2); last = nm; } }
+            fprintf(stderr, "\n");
+            watch_v[k] = v;
+        }
+        usleep(nwatch ? 100 : 250000); if (nwatch && tick % 2500) continue;
+        FILE *f = fopen(path, "r"); if (!f) continue;
+        fseeko(f, pos, SEEK_SET);
+        while (fgets(line, sizeof line, f)) {
+            size_t l = strlen(line); if (!l || line[l - 1] != '\n') break;
+            pos += (off_t)l; line[l - 1] = 0;
+            int w = !strncmp(line, "watch:", 6); char *e = line + (w ? 6 : 0); uint32_t at = (uint32_t)strtoul(e, &e, 16), v = 0;
+            for (;;) { if (at < 0x10000u) { v = 0; break; } memcpy(&v, G_MEM + at, 4); if (*e != ',') break; at = v + (uint32_t)strtoul(e + 1, &e, 16); }
+            if (w && at >= 0x10000u && nwatch < 8) { watch_at[nwatch] = at; watch_v[nwatch++] = v; fprintf(stderr, "DungeonSiegeNative: watching %08x (now 0x%08x)\n", at, v); continue; }
+            fprintf(stderr, "DungeonSiegeNative: peek %s = 0x%08x (byte 0x%02x)\n", line, v, v & 0xff);
+        }
+        fclose(f);
+    }
+    return 0;
+}
 static const char *script_tick(uint32_t fno)       /* returns a screenshot path if one is due */
 {
     const char *shot = 0;
@@ -208,6 +250,12 @@ static const char *script_tick(uint32_t fno)       /* returns a screenshot path 
             if (fno == a->frame) { mot_home = 8; mot_dx = a->x; mot_dy = a->y; }
             if (fno == a->frame + 20) post(r ? 0x204 : 0x201, r ? 2 : 1, pos_lp());
             if (fno == a->frame + 24) post(r ? 0x205 : 0x202, 0, pos_lp());
+        } else if (!strcmp(a->kind, "dclick")) {         /* a double click, as Windows sends it: down, up, double-click, up */
+            if (fno == a->frame) { mot_home = 8; mot_dx = a->x; mot_dy = a->y; }
+            if (fno == a->frame + 20) post(0x201, 1, pos_lp());
+            if (fno == a->frame + 22) post(0x202, 0, pos_lp());
+            if (fno == a->frame + 24) post(0x203, 1, pos_lp());
+            if (fno == a->frame + 26) post(0x202, 0, pos_lp());
         } else if (!strcmp(a->kind, "press")) {           /* press:x,y: the left button pressed and held (until a later click) */
             if (fno == a->frame) { mot_home = 8; mot_dx = a->x; mot_dy = a->y; }
             if (fno == a->frame + 20) post(0x201, 1, pos_lp());
@@ -629,6 +677,7 @@ int main(int argc, char **argv)
         NSSetUncaughtExceptionHandler(on_objc_exception);
         ensure_resolution(drive_c);
         test_mode = getenv("DS_TEST") && atoi(getenv("DS_TEST"));
+        if (test_mode && getenv("DS_PEEKFILE")) { pthread_t pt; pthread_create(&pt, 0, peek_thread, (void *)getenv("DS_PEEKFILE")); pthread_detach(pt); }
         ds_trace_init(&frame_trace);
         lab_mode = !test_mode && getenv("DS_TEST_LAB") && !strcmp(getenv("DS_TEST_LAB"), "1");
         if (test_mode) parse_script();
@@ -658,7 +707,7 @@ int main(int argc, char **argv)
         pthread_attr_init(&a); pthread_attr_set_qos_class_np(&a, QOS_CLASS_USER_INTERACTIVE, 0);
         pthread_create(&t, &a, render_thread, 0);
         pthread_attr_setstacksize(&a, 256u << 20);
-        pthread_create(&t, &a, game_thread, 0);
+        pthread_create(&t, &a, game_thread, 0); game_pt = t;
         [NSApp run];
     }
     return 0;

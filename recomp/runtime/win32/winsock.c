@@ -136,6 +136,7 @@ IMPL(wsock32, ord20)                                    /* sendto(s, buf, len, f
     if (ARG(4)) { if (!to_host(ARG(4), ARG(5), &a)) RET(fail(c, 10014), 6); n = sendto(fd, GP(ARG(1)), ARG(2), (int)(ARG(3) & 1), (struct sockaddr *)&a, sizeof a); }
     else n = send(fd, GP(ARG(1)), ARG(2), (int)(ARG(3) & 1));
     if (n < 0) RET(fail_errno(c), 6);
+    if (ARG(4) && getenv("W32_NETLOG")) { char ip[32], w[48]; inet_ntop(AF_INET, &a.sin_addr, ip, sizeof ip); snprintf(w, sizeof w, "sendto %s:%u", ip, ntohs(a.sin_port)); netlog(w, ARG(0), GP(ARG(1)), n); }
     RET((uint32_t)n, 6);
 }
 IMPL(wsock32, ord17)                                    /* recvfrom(s, buf, len, flags, from, fromlen*) */
@@ -143,6 +144,7 @@ IMPL(wsock32, ord17)                                    /* recvfrom(s, buf, len,
     SOCK(ARG(0), 6); struct sockaddr_in a; socklen_t l = sizeof a; memset(&a, 0, sizeof a);
     ssize_t n = recvfrom(fd, GP(ARG(1)), ARG(2), (int)(ARG(3) & 3), (struct sockaddr *)&a, &l);
     if (n < 0) RET(fail_errno(c), 6);
+    if (getenv("W32_NETLOG")) { char ip[32], w[48]; inet_ntop(AF_INET, &a.sin_addr, ip, sizeof ip); snprintf(w, sizeof w, "recvfrom %s:%u", ip, ntohs(a.sin_port)); netlog(w, ARG(0), GP(ARG(1)), n); }
     if (ARG(4)) to_guest(&a, ARG(4), ARG(5));
     RET((uint32_t)n, 6);
 }

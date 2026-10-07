@@ -53,7 +53,9 @@ IMPL(wsock32, ord52)
         if (!n) addrs[n++] = htonl(INADDR_LOOPBACK);
         uint32_t portmap_public_ip(void); uint32_t pub = getenv("DS_NO_PORTMAP") ? 0 : portmap_public_ip();   /* for internet players */
         int dup = 0; for (int i = 0; i < n; i++) if (addrs[i] == pub) dup = 1;
-        if (pub && !dup && n < 16) { memmove(addrs + 1, addrs, sizeof *addrs * (size_t)n); addrs[0] = pub; n++; }   /* first: the one to give out */
+        /* the LAN addresses first: the game gives the first one out in its LAN lobby's discovery packets and connects
+         * to its own lobby server there (the router's public address, first before, was unreachable from the LAN) */
+        if (pub && !dup && n < 16) addrs[n++] = pub;
     } else {
         struct addrinfo hint = {0}, *res = 0; hint.ai_family = AF_INET; char alt[300]; const char *q = lobby_rewrite(name, alt, sizeof alt);
         if (getaddrinfo(q ? q : name, 0, &hint, &res)) RET(0, 1);
@@ -86,7 +88,7 @@ IMPL(ole32, CoCreateInstance)
 {
     uint32_t clsid = ARG(0), out = ARG(4);
     uint32_t w32_dpnet_create(uint32_t clsid_first_dword);
-    uint32_t obj = w32_dpnet_create(rt_r32(G_MEM, clsid));           /* DirectPlay 8 client, server, address */
+    uint32_t obj = w32_dpnet_create(rt_r32(G_MEM, clsid));           /* DirectPlay 8 client, server, address, thread pool */
     if (obj) { if (out) rt_w32(G_MEM, out, obj); RET(0, 5); }
     const uint8_t *g = GP(clsid);
     fprintf(stderr, "w32: CoCreateInstance({%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}) -> class not registered\n", rt_r32(G_MEM, clsid),
