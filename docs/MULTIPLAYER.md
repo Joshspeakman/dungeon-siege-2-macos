@@ -7,13 +7,39 @@ online service the game was built on (shut down in 2014).
 ## What works so far
 
 - **Main menu → Multiplayer** opens the game's own screens (Local Network, Internet, GameSpy).
-- **The lobby:** the game signs in to [OpenSpy](https://openspy.net), the community-run GameSpy replacement, and shows
-  its party selection, game list and chat rooms. Dungeon Siege II goes through this lobby for every kind of game,
-  LAN games included.
-- **Parties and portals:** creating a multiplayer party in the lobby works, and the portal list (OpenSpy's rooms,
-  with their player and game counts) comes up.
-- **Not tested yet:** hosting and joining a game (needs two machines), and play between a Mac and a PC. Importing a
-  single-player hero as a party has only been tried by scripted input, which can't double-click the list.
+- **LAN games:** Local Network → a nickname → the LAN lobby. Players on the same network find each other there,
+  create or import a party, and one of them hosts a game; the others join its staging area, mark Ready, and the host
+  starts it. Everyone loads into the same world and plays together. **A LAN game needs no CD key and no internet
+  connection** (no OpenSpy either): the lobby runs on the players' own machines.
+- **Parties:** created or imported in the lobby, they're saved under `Save/MultiPlayer/<name>`. Importing copies a
+  single-player hero there and leaves the single-player save as it was.
+- **The online lobby:** Internet signs in to [OpenSpy](https://openspy.net), the community-run GameSpy replacement,
+  and shows its party selection, game list and chat rooms. It needs a CD key (below).
+- **Tested** with two copies of the game on one Mac (lobby, hosting, joining, the intro, playing in the same area).
+  **Not tested yet:** two Macs, play between a Mac and a PC, internet games.
+
+### How the port makes LAN games work
+
+The GOG 2.3 release shipped with multiplayer switched off, and its LAN path had never worked. The port fixes three
+things in it:
+
+- **The DirectPlay thread pool.** The game creates one before its DirectPlay client and server; it was missing, and
+  Host Game froze behind an error message the game never showed.
+- **A multiplayer world session.** The game makes its world session multiplayer only on the way back from a game into
+  the lobby, never on the first visit from the main menu. With a single-player session a hosted game loaded with the
+  single-player rules: Start did nothing (no player had a start position), the host never finished syncing with the
+  others, kept its game locked, and nobody could join. The port gives the lobby a multiplayer session the way the game
+  does itself (a hook on its frontend state change).
+- **Addresses.** The game gives out the first address it finds for the own machine; the port lists the LAN ones first
+  (the router's public address last).
+
+### Known issues
+
+- After leaving the lobby for a single-player game, the lobby's Party Selection window stays drawn over the top left
+  of the screen (it does with the port's session fix switched off too).
+- The intro movie plays on every machine when a game starts; Esc skips it.
+- Two copies on one Mac can't ping each other (both want GameSpy's ping port, 13139), so the connection bars in the
+  staging area stay red there. Separate machines don't have this.
 
 ## Your CD key
 
@@ -41,10 +67,10 @@ Key** in the launch window.
 
 - `DS2_LOBBY=off`: don't redirect the game's GameSpy addresses to OpenSpy.
 - `DS2_NO_MULTIPLAYER=1`: keep the Multiplayer button disabled, as the GOG release ships.
+- `DS2_NO_MP_SESSION=1`: keep the game's single-player world session in the multiplayer lobby (LAN games then don't start).
 - `DS_NO_PORTMAP=1`: don't ask the router to forward ports when hosting.
 
 ## Privacy
 
 Going online sends your nickname, your IP address and your game listings to OpenSpy's servers, as the game once did
-to GameSpy. Your CD key hash is sent to the lobby, as the original game did. A built-in lobby for playing on a LAN
-without any online service is planned.
+to GameSpy. Your CD key hash is sent to the lobby, as the original game did. LAN games stay on your network.

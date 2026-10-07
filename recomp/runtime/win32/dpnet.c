@@ -864,7 +864,8 @@ static void gather(uint32_t bufs, uint32_t count, Blob *out)
 static void dump_args(const char *what, Ctx *c, int n)
 {
     if (!getenv("W32_DPLOG")) return;
-    fprintf(stderr, "dpnet %7.3f: %s(", dp8_tick() / 1000.0, what); for (int i = 1; i < n; i++) fprintf(stderr, "%s%08x", i > 1 ? ", " : "", ARG(i)); fprintf(stderr, ")\n");
+    fprintf(stderr, "dpnet %7.3f: %s(", dp8_tick() / 1000.0, what); for (int i = 1; i < n; i++) fprintf(stderr, "%s%08x", i > 1 ? ", " : "", ARG(i));
+    fprintf(stderr, ") from %08x\n", rt_r32(G_MEM, c->esp));
 }
 #define STUB(name, n, hr) static void name(Ctx *c) { dump_args(#name, c, n); RET(hr, n); }
 static void cs_QueryInterface(Ctx *c) { dump_args("QueryInterface", c, 3); a_QueryInterface(c); }
