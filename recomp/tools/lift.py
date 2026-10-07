@@ -22,7 +22,7 @@ HOOKS = {                 # address: description (runtime/win32/hooks.c rt_hook)
     0x00544df0: 'vertex lighting of a directional light: the loop done natively (native.c)',
     0x00544ee5: 'after that loop: DS2_NATIVE_CHECK compares the native result with the original',
     0x0090a076: 'mood read: its frustum and fog blocks are in (DS_DRAW_DISTANCE scales them)',
-    0x004e32df: 'staging Start: in a LAN game every player counts as placed (the world places them as it loads)',
+    0x00423335: 'frontend state change into a multiplayer lobby: a multiplayer world session, as on the way back from a game',
 }
 JUNK = {'in', 'out', 'insb', 'insd', 'insw', 'outsb', 'outsd', 'outsw', 'iretd', 'hlt', 'cli', 'sti', 'int1', 'into',
         'int', 'aaa', 'aas', 'aam', 'aad', 'daa', 'das', 'salc', 'les', 'lds', 'retf', 'ljmp', 'lcall', 'arpl', 'bound',
