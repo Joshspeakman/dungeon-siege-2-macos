@@ -568,6 +568,7 @@ static int post_enum_query(Ctx *c, Ev *e, uint32_t pm, uint32_t hr)
     (void)c; Sess *s = e->s;
     obj_release(O(e->a[0])); obj_release(O(e->a[1])); gfree(e->a[2]);
     uint32_t rdata = rt_r32(G_MEM, pm + 24), rsize = rt_r32(G_MEM, pm + 28), rctx = rt_r32(G_MEM, pm + 32);
+    LOG("server: enumeration from %s:%u -> the game answers %08x%s\n", inet_ntoa(e->addr.sin_addr), ntohs(e->addr.sin_port), hr, (int32_t)hr >= 0 ? "" : " (not answered)");
     if ((int32_t)hr >= 0) {
         pthread_mutex_lock(&s->m);
         Buf b = {0}; uint8_t h[4] = {0, 3, (uint8_t)e->a[8], (uint8_t)(e->a[8] >> 8)}; bput(&b, h, 4);

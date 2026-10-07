@@ -50,12 +50,26 @@ __attribute__((unused)) static void guest_format(char *out, size_t cap, uint32_t
     }
     out[n] = 0;
 }
+/* The staging area's Start (0x4e32c3) first compares the players the world map has placed at a start position
+ * ([WorldMap+0x1c], esi) with the human players in the game (eax), and does nothing while any are missing. A party is
+ * placed when it is loaded from a multiplayer save, which in this release happens only for a GameSpy profile (the
+ * network mode query, 0x56f867, answers 1 only with a profile ID); in a LAN game no party is ever placed, so Start
+ * never starts. The world places every player as it loads anyway, so in a LAN game (no profile ID: [[[0xbcb2c4]+4]+8]
+ * is 0) the check counts them all as placed. DS2_NO_LAN_START=1 keeps the original. */
+static void lan_start_check(Ctx *c)
+{
+    static int off = -1; if (off < 0) off = getenv("DS2_NO_LAN_START") != 0;
+    uint32_t net = rt_r32(G_MEM, 0x00bcb2c4u), w = net ? rt_r32(G_MEM, net + 4) : 0;
+    if (off || !w || rt_r32(G_MEM, w + 8) || c->esi >= c->eax) return;
+    c->esi = c->eax;
+}
 int native_hook(Ctx *c, uint32_t addr);   /* native.c */
 void rt_hook(Ctx *c, uint32_t addr)
 {
     if (native_hook(c, addr)) return;
     switch (addr) {
     case 0x0090a076u: mood_read(c); break;
+    case 0x004e32dfu: lan_start_check(c); break;
     default:   /* development trace hooks (tools/lift.py DS_TRACE_HOOKS) */
         if (getenv("DS_HOOKTRACE")) fprintf(stderr, "hook %08x: eax %08x ecx %08x edx %08x ebx %08x esi %08x edi %08x | ret %08x args %08x %08x %08x %08x\n",
                                             addr, c->eax, c->ecx, c->edx, c->ebx, c->esi, c->edi, rt_r32(G_MEM, c->esp), rt_r32(G_MEM, c->esp + 4),
