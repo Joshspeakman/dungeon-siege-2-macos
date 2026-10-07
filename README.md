@@ -72,9 +72,9 @@ Details, the CD key and settings: [docs/MULTIPLAYER.md](docs/MULTIPLAYER.md).
 
 ## Nightly
 
-This is the `nightly` branch (experimental work, before it reaches `main`). `./install.sh --nightly` installs it as
-**Dungeon Siege II Nightly** next to the stable app, sharing the same saves and settings. Ahead of `main`: LAN
-multiplayer and the launch window above.
+`./install.sh --nightly` installs **Dungeon Siege II Nightly** next to the stable app, built from the `nightly` branch
+(experimental work, before it reaches `main`), sharing the same saves and settings. Right now `nightly` and `main` are
+the same.
 
 ## Tests
 
