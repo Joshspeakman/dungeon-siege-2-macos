@@ -54,7 +54,7 @@ the key check. A key for every buyer would have to come from the rights holder.
 
 **Each copy needs its own key.** The same key can't be in the lobby from two computers at once, as with GameSpy.
 
-- **On a Mac (this app):** in the launch window, click **Online** and enter the key. Or, from the repository:
+- **On a Mac (this app):** in the launch window, press **Online** and enter the key. Or, from the repository:
   `./install.sh --cd-key`. A first install also offers it at the end.
 - **For a Windows PC** (or Wine/Proton on Linux) **without the retail installer:** on any Mac with this repository,
   `./install.sh --cd-key --reg-file DS2-cdkey.reg` with that PC's own key, then on the PC double-click the `.reg`

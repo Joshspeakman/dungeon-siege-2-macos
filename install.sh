@@ -197,6 +197,15 @@ fi
 rm -rf "$I"
 codesign --force --deep --sign - "$A" >/dev/null 2>&1 || true
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$A" 2>/dev/null || true
+# the launch window's banner: the game's key art from Steam's store page (as the DS1 port does); DS_NO_DOWNLOADS=1 skips it,
+# and without it the window shows the game's own logo
+ART_URL=https://cdn.cloudflare.steamstatic.com/steam/apps/39200/library_hero.jpg
+if [ -z "${DS_NO_DOWNLOADS:-}" ] && [ ! -s "$DATA/art/banner.jpg" ]; then
+  mkdir -p "$DATA/art"; f="$DATA/art/banner.jpg"
+  if curl -fsSL --retry 2 -o "$f.part" "$ART_URL" && [ "$(head -c 3 "$f.part" | xxd -p)" = ffd8ff ] && [ "$(wc -c < "$f.part")" -gt 50000 ]; then
+    mv "$f.part" "$f"; echo "== the launcher's banner: Dungeon Siege II's key art, from Steam's store"
+  else rm -f "$f.part"; echo "   (the launcher's banner couldn't be downloaded; the window shows the game's logo)"; fi
+fi
 echo "== done: $A (data in $DATA)"
 # online play needs the player's own CD key: offered once, on an interactive install (not by the launcher's updater)
 if [ ! -f "$DATA/cdkey-hash.txt" ] && [ -t 0 ] && [ -z "$AS_NIGHTLY$CDKEY" ]; then
