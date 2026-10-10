@@ -337,10 +337,14 @@ static void capture(int on);
  * (DS_NOTCH=around) the whole display, the camera housing over the picture's top centre; otherwise the area below it
  * (AppKit would move this borderless window below the notch without making it shorter, its bottom off the screen). */
 static int notch_around(void) { static int v = -1; if (v < 0) v = getenv("DS_NOTCH") && !strcmp(getenv("DS_NOTCH"), "around"); return v; }
+/* macOS full screen keeps a window below the camera housing whatever it asks for, so around the notch the game is a
+ * screen-sized borderless window instead (the Dock and menu bar hidden while it is in front) */
+static int borderless(void) { return getenv("DS_BORDERLESS") || notch_around(); }
 @interface GameWindow : NSWindow @end
 @implementation GameWindow
 - (BOOL)canBecomeKeyWindow { return YES; }
 - (BOOL)canBecomeMainWindow { return YES; }
+- (NSRect)constrainFrameRect:(NSRect)r toScreen:(NSScreen *)sc { return borderless() ? r : [super constrainFrameRect:r toScreen:sc]; }   /* over the menu bar and notch */
 - (NSRect)gameFrame
 {
     NSRect f = (self.screen ?: NSScreen.mainScreen).frame;
@@ -466,7 +470,10 @@ static void window_changed(uint32_t hwnd, int x, int y, int w, int h, int visibl
             else if (lab_mode) { [win makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; void lab_window_show(void); lab_window_show(); }
             else {
                 [win makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; capture(1);
-                if (getenv("DS_BORDERLESS")) [NSApp setPresentationOptions:NSApplicationPresentationHideDock | NSApplicationPresentationHideMenuBar];   /* the old way: a screen-sized window */
+                if (borderless()) {   /* a screen-sized window, the Dock and menu bar hidden: around the notch, or DS_BORDERLESS */
+                    [NSApp setPresentationOptions:NSApplicationPresentationHideDock | NSApplicationPresentationHideMenuBar];
+                    [win setFrame:(win.screen ?: NSScreen.mainScreen).frame display:YES];
+                }
                 else enter_fullscreen();
             }
         }
@@ -667,7 +674,7 @@ int main(int argc, char **argv)
                 }
             }
         }
-        if (@available(macOS 12.0, *)) if (!getenv("DS_BORDERLESS") && !notch_around()) w32_screen_h -= (int)NSScreen.mainScreen.safeAreaInsets.top;   /* full screen below a notch (the launcher's Notch row) */
+        if (@available(macOS 12.0, *)) if (!borderless()) w32_screen_h -= (int)NSScreen.mainScreen.safeAreaInsets.top;   /* full screen below a notch (the launcher's Notch row) */
         if (getenv("DS_TEST_LAB") && !strcmp(getenv("DS_TEST_LAB"), "1")) {   /* the lab window's helper scripts: in the app, or beside a development build */
             NSString *t = [bin stringByAppendingPathComponent:@"../Resources/test_lab"];
             if (![NSFileManager.defaultManager fileExistsAtPath:t]) t = [bin stringByAppendingPathComponent:@"../../../host/test_lab"];
