@@ -87,6 +87,8 @@ spells and powers in the Test Lab) and a 6-minute random-input soak. Tools in `r
 - `dp8test.c` and `dp8fuzz.c`: the DirectPlay 8 transport against Microsoft's protocol examples, a loopback session
   with packet loss, and hostile input;
 - `test_lab_test.py`: the Test Lab's archive, parser and protocol code, without game files;
+- `renderer_init_test.m`, `frame_trace_test.c`: Metal buffer source bounds and safe frame-trace shutdown, with
+  memory/thread sanitizers; `frame_wait_test.c` measures the capped-frame wait's CPU cost and deadline lateness;
 - `harness.py`, `fuzz_insn.py`, `test_slice.py`, `startup.py`: the recompiler checked instruction by instruction
   against the original x86 in Unicorn (from the Dungeon Siege 1 port);
 - `audiocheck.c`, `undname_test.c`, `tracediff.py`: recorded audio against a reference, symbol demangling, traces.
