@@ -4,7 +4,16 @@ Same approach as the Dungeon Siege 1 port: the user's own GOG copy is recompiled
 compiled for arm64 and linked with a macOS implementation of the Windows APIs it uses. Nothing from the game is
 committed.
 
-## Status (2026-10-05)
+## Current work (2026-10-10)
+
+The shader translator, launcher/installer/updater and LAN multiplayer have been implemented since the snapshot
+below. Current behavior and validation are in [README](../README.md) and [the recompiler notes](../recomp/README.md).
+Remaining work includes C++ catch continuations, wider gameplay/expansion coverage, and multiplayer between separate
+machines. Original-game scene comparisons are tracked in [issue 1](https://github.com/Joshspeakman/dungeon-siege-2-macos/issues/1).
+
+The following tables are the historical bring-up plan, not the current implementation status.
+
+## Bring-up snapshot (2026-10-05)
 
 | Step | State |
 |---|---|
@@ -18,7 +27,7 @@ committed.
 | D3DX (`d3dx9.c`) | `D3DXCreate*Texture`, textures from DDS/TGA/BMP in memory (missing mips box-filtered, DXT re-encoded), `D3DXLoadSurfaceFromMemory`; effects/HLSL still stubs |
 | Winsock (`winsock.c`) | WSOCK32 1.1 by ordinal on BSD sockets; test mode binds to loopback only |
 
-## Next steps
+## Original next steps
 
 | # | Work | Notes |
 |---|---|---|
