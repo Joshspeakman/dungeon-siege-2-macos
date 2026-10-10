@@ -68,6 +68,29 @@ chosen from.
 
 ## Verification and known gaps
 
+**Original-game comparison, 2026-10-10.** The [original-game reference](https://github.com/Joshspeakman/dungeon-siege-2-macos/issues/1)
+uses the original English GOG 2.3 executable under Wine 11.19, DXVK 2.5.1 and Microsoft's D3DX9_29 on an RTX 3080 Ti;
+it is not a native Windows capture. Its executable and all eight official resource archive hashes match this Mac.
+The supplied new Baseline character was loaded in an isolated profile at 800x600, Advanced shaders, Trilinear,
+gamma 1.0 and original view distance. Western Greilyn's animated grey-brown water beneath gold fog, shore/ship,
+portraits and inventory character lighting match the reference's feature coverage. None/All Complex shadows were
+also compared; the original difference is subtle in this diffuse beach lighting, so this does not prove shadow
+coverage in other locations. Camera/animation phases vary. No shader change was justified by this comparison.
+
+**Runtime follow-up.** Deleted critical-section entries no longer terminate a hash collision chain and hide a
+still-live mutex; lookup searches past deleted slots, and deletion/reuse share the table lock. Metal's upload ring
+now grows safely when one upload or draw reservation exceeds its capacity, waiting for outstanding GPU work before
+replacing the buffer. Previously a 5.76 MB upload with the development `DSR_RINGMB=4` setting returned an invalid
+range, and an oversized draw reservation bypassed the guard against changing encoders midway through a draw.
+The normal 256 MB default is unchanged. These are stability fixes, not a measured average-FPS improvement.
+
+Run `recomp/tests/runtime_regressions.sh` on macOS without game assets: it checks collisions, recursive ownership,
+full-table reuse and concurrent churn under ASAN/UBSAN and TSan, plus oversized uploads, draw reservation, wrapping
+and a real Metal buffer copy under ASAN/UBSAN. Both new regressions fail on the previous implementations.
+The live original-reference scene also runs with the reduced 4 MB ring to exercise frequent wrapping; at the 60 fps
+cap it sustained 60 fps with no dropped draws, with typical reported GPU work around 1.3 ms for Shadows None and
+2.0 ms with All Complex and the inventory view. Capped figures are scene checks, not an uncapped benchmark.
+
 The instruction-level harness (`tests/harness.py`, `tests/fuzz_insn.py`, `tests/test_slice.py`) comes from the
 Dungeon Siege 1 port, where every instruction form the game used was checked bit-for-bit against Unicorn; it has not
 been re-run on DS2's instruction mix yet. DS2 has been checked by playing: menus, hero creation, movies, the opening

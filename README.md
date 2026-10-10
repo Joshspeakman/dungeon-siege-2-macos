@@ -73,8 +73,8 @@ Details, the CD key and settings: [docs/MULTIPLAYER.md](docs/MULTIPLAYER.md).
 ## Nightly
 
 `./install.sh --nightly` installs **Dungeon Siege II Nightly** next to the stable app, built from the `nightly` branch
-(experimental work, before it reaches `main`), sharing the same saves and settings. Right now `nightly` and `main` are
-the same.
+(experimental work, before it reaches `main`), sharing the same saves and settings. Nightly includes the current
+visual and runtime audit fixes; it can differ from `main`.
 
 ## Tests
 
@@ -89,6 +89,8 @@ spells and powers in the Test Lab) and a 6-minute random-input soak. Tools in `r
 - `test_lab_test.py`: the Test Lab's archive, parser and protocol code, without game files;
 - `renderer_init_test.m`, `frame_trace_test.c`: Metal buffer source bounds and safe frame-trace shutdown, with
   memory/thread sanitizers; `frame_wait_test.c` measures the capped-frame wait's CPU cost and deadline lateness;
+- `runtime_regressions.sh`: no-game macOS sanitizer checks for critical-section collision/deletion/reuse and
+  oversized Metal uploads, draw reservations, GPU copies and buffer wrapping;
 - `harness.py`, `fuzz_insn.py`, `test_slice.py`, `startup.py`: the recompiler checked instruction by instruction
   against the original x86 in Unicorn (from the Dungeon Siege 1 port);
 - `audiocheck.c`, `undname_test.c`, `tracediff.py`: recorded audio against a reference, symbol demangling, traces.
