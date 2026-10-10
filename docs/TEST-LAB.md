@@ -75,6 +75,39 @@ correctly. Once, a frame taken just after the first lightning blast showed the w
 fine); it did not happen again in three repeats of the same casts: if you see a white flash with a spell, mark it
 with a note. The lab's window itself (the launcher's Test Lab entry) has not been tried by hand yet.
 
+## October 2026 audit
+
+The existing shader suite passes all 42 effect passes and 156 render checks on the M1 Pro. A copied Harker save
+was checked with Advanced shaders in the tutorial, Northern Greilyn Jungle and Snowbrook Mountain. Three visible
+repeats each of fireball, iceball and lightning blast, with three spawned Skath Disciples, did not reproduce the
+previous full-screen white flash. A first series was obscured by a tutorial popup and was repeated after dismissing
+it. Brightness monitoring only flagged the startup fade; this does not establish that the intermittent flash is fixed.
+An original-game baseline from the reference host is still needed before claiming complete visual parity.
+
+The Metal buffer used when a vertex has no diffuse color now has a full 16-byte source. Previously it copied 16
+bytes from a 4-byte stack value. `renderer_init_test.m` forwards buffer creation through an instrumented CPU copy:
+AddressSanitizer reproduces the old stack overread and passes with the corrected initialization.
+
+The frame limiter sleeps until about 200 microseconds before its deadline instead of spinning for up to 2 ms.
+The same 1280×720 tutorial save held 60 FPS before and after, while game-thread samples in the busy clock loop
+fell from 163/2313 (7.0%) to 4/636 (0.6%). A 120 FPS run also maintained the target in the quiet saved scene.
+GPU work was about 2.2–3.0 ms there. Busy jungle/snow fights ran around 100 FPS with roughly 4 ms GPU work;
+the change reduces capped waiting cost, not the game's CPU cost in those fights. Captures, loading and CPU
+sampling introduce their own stalls and are excluded from steady-scene pacing observations.
+
+Frame timing exports now synchronize with GPU completion callbacks and competing quit requests. Late callbacks
+cannot write freed samples, and unfinished or invalid timestamps are omitted rather than wrapping into enormous
+unsigned intervals. `frame_trace_test.c` covers late completions and concurrent shutdown under AddressSanitizer,
+UndefinedBehaviorSanitizer and ThreadSanitizer. Background test focus changes also no longer pause the guest;
+normal interactive focus handling remains the same.
+
+```sh
+clang -O1 -g -fsanitize=address,undefined recomp/tests/frame_trace_test.c -o /tmp/frame_trace_test
+/tmp/frame_trace_test
+clang -O1 -g -fsanitize=thread recomp/tests/frame_trace_test.c -o /tmp/frame_trace_tsan
+/tmp/frame_trace_tsan
+```
+
 ## From a terminal
 
 `recomp/host/test_lab/lab_tool.py` sends the same requests while a lab game is running, for scripted checks:
