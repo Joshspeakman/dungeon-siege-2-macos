@@ -235,6 +235,22 @@ generated from the game stays in `recomp/work/` and is never committed. Details 
 | [recomp/README.md](recomp/README.md) | How the recompiler works, verification, developer switches |
 | [docs/PLAN.md](docs/PLAN.md) | Open work and the original bring-up plan |
 
+## A note from the author
+
+These projects are roughly 90% built with AI, with human testing along the way. I started them because some of my
+favorite games either ran badly on macOS or wouldn’t run at all, and Wine and CrossOver didn’t always get me where I
+wanted.
+
+I’m a 40-year-old dad with a full-time job. I don’t have the time or desire to write all of this from scratch, and AI
+made it possible to get somewhere with it.
+
+If that puts you off, no hard feelings. Use them, skip them, fork them. It’s all good. I would have happily used an
+existing, human-written native port, but I couldn’t find one that did what I wanted. Mostly, I just want to play my
+games.
+
+The aim is straightforward native builds without unwanted extras or a stack of translation layers. Forks and
+improvements are welcome.
+
 ## Legal
 
 This project contains no game code, data or assets. The game's executable is recompiled on your own Mac from your own
