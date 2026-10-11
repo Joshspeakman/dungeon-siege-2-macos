@@ -33,7 +33,9 @@ open ~/Applications/"Dungeon Siege II Native.app"
   isn't needed.
 - On the first build the recompiler makes a Python environment in `recomp/.venv` and installs `capstone` and `unicorn`
   into it with pip, so the first install needs an internet connection.
-- Time: the recompile takes about 10 minutes on an M1 Pro, and runs again on every update.
+- Build time and peak disk use have not been verified for a clean install. Allow room for your game files,
+  generated source and object files, the app, and additional update worktrees; time varies with the Mac. The game
+  is recompiled on every update.
 - Optional: [Homebrew](https://brew.sh) and `brew install innoextract`, for installing from the GOG offline installer.
 - **Dungeon Siege II, GOG release 2.3** (offline installer build 37617). The installer checks the SHA-256 of
   `DungeonSiege2.exe` and refuses anything else:
@@ -64,7 +66,10 @@ cd dungeon-siege-2-macos
 ```
 
 This recompiles the game and installs **`~/Applications/Dungeon Siege II Native.app`** (shown as *Dungeon Siege II*).
-Keep the cloned folder: the app's Updates row rebuilds from it. On an interactive first install the script ends by
+Keep the cloned folder: the app's Updates row rebuilds from it.
+Keep the clone in a path without spaces: the current compile scripts split source paths on whitespace.
+
+On an interactive stable install without a stored key, the script ends by
 offering to store a CD key for online play; press Return to skip (LAN games don't need one).
 
 Every `install.sh` option:
@@ -95,14 +100,15 @@ and the window then shows the game's own logo.
 ## The launch window
 
 Opening the app shows the launch window first: the game's key art, the Game row, then Display, Graphics, Online and
-Updates as buttons that show what's chosen. Press **Play** (or Return); choices are remembered.
+Updates as buttons that show what's chosen. Press **Play** (or Return); display choices are remembered. The Game row starts on Dungeon Siege II each time;
+choose Test Lab again when you want it.
 
 | Setting | Choices |
 |---|---|
 | Game | **Dungeon Siege II** (the campaign, and multiplayer from the main menu) · **Test Lab** (below) |
 | Display → Resolution | the display's own resolution (recommended), its full Retina size, and standard sizes that fit |
-| Display → Interface Size | 100% to 300%: the game runs at the resolution divided by it (a larger interface), and the screen is drawn at the full resolution, so the world stays sharp |
-| Display → Frame Rate | **Automatic** (120 fps on a 120 Hz display, 60 in the heaviest scenes) · 120 · 60 · 30 · Unlimited |
+| Display → Interface Size | 100% to 300%: the game runs at the resolution divided by it (a larger interface), and the screen is drawn at the full resolution, so the world stays sharp; only sizes leaving at least 800×600 are offered |
+| Display → Frame Rate | **Automatic** (120 fps on a 120 Hz display, 60 in the heaviest scenes) · 120 (only on displays reporting at least 120 Hz) · 60 · 30 · Unlimited |
 | Display → View Distance | **Original** · Far (125%) · Farther (150%, like SeeFar) · Very Far (200%) · Horizon (250%) · Maximum (300%) |
 | Display → Gamma, Notch | the game's brightness; on a Mac with a notch, **Hide the Notch** (the picture below the camera) or **Around the Notch** (the whole display) |
 | Graphics | the game's own Shaders (Game's Choice until one is picked, Off, Standard, Advanced), Shadows, Texture Filtering and Object Detail, written to its settings (`prefs.gas`), so its Video page needn't be used |
@@ -122,18 +128,20 @@ the game.
 **From the app:** the launch window's **Updates** row asks GitHub for the newest commit of the app's branch: `main` for
 *Dungeon Siege II*, `nightly` for *Dungeon Siege II Nightly*. When it says **Update available**, press it. The new
 version is checked out into `build/stable` (or `build/nightly`) inside your clone, the app is rebuilt from your copy of
-the game (about 10 minutes, with a progress window), and it restarts. Your own checkout, game folder, saves, settings
+the game (with a progress window), and offers a Restart button when it finishes.
+Your own checkout, game folder, saves, settings
 and CD key are left as they are. The output goes to `update.log` in the data folder.
 
-This needs the clone the app was installed from, still in the same place; otherwise the row says *Not available*.
-*Couldn't check* means GitHub wasn't reachable (`git fetch` in the clone has to work); press it to retry.
+Keep the clone in the same place. *Not available* means the app has no usable updater script; *Couldn't check*
+means the script failed to read the remote branch, for example because the clone moved, GitHub was unreachable or
+git needed a sign-in. Press the row to retry.
 
 **Known limitation:** the updater runs the new `install.sh` without the options you first installed with. If you used
-`--app-dir` or `--data-dir`, update by hand instead: with a custom `--app-dir` the update can't find the installed app
-and stops, and with a custom `--data-dir` the rebuilt app would use the default data folder.
+`--app-dir` or `--data-dir`, update by hand with the same options. The updater searches the default app folder,
+so it may fail to find your app or use another installed copy, and it rebuilds with the default data folder.
 
 **By hand:** `git pull`, then run `./install.sh` again (with the same `--app-dir`/`--data-dir`, if any; the game
-folder is remembered).
+folder is remembered). Use `./install.sh --nightly` for the Nightly app.
 
 **Stable and Nightly.** New work lands on the `nightly` branch first and reaches `main` once it has proven itself.
 `./install.sh --nightly` builds the newest `nightly` in `build/nightly` (your checkout stays as it is) and installs
@@ -168,9 +176,11 @@ Details, the CD key, PC players and settings: [docs/MULTIPLAYER.md](docs/MULTIPL
 - Of the shader effects, the water and the glow are seen in play; heat shimmer, shadow blur, ice, specular and Dot3
   lighting are checked by render tests only. Distant water looks hazy with shaders on; that comes from the game's own
   water shader, which fogs by distance.
-- Around the Notch uses a borderless window rather than macOS full screen.
+- Around the Notch uses a borderless window without Game Mode. [Game Mode](https://support.apple.com/en-us/105118) requires macOS 14 or later and macOS full screen.
 - C++ exception catch continuations aren't implemented (the game hasn't needed them).
-- Not supported: the Broken World expansion, the Steam and retail releases, controllers.
+- Not supported: the Broken World expansion and the Steam and retail releases.
+- Input is implemented for keyboard, mouse and trackpad. There is no built-in controller support; external
+  controller-to-keyboard/mouse remapping has not been tested.
 
 Open issues: [github.com/Joshspeakman/dungeon-siege-2-macos/issues](https://github.com/Joshspeakman/dungeon-siege-2-macos/issues).
 
@@ -187,8 +197,8 @@ Open issues: [github.com/Joshspeakman/dungeon-siege-2-macos/issues](https://gith
 - **A crash or freeze:** the app writes a report to `~/Games/DungeonSiege2Native/CrashReports` and offers it on the
   next launch. Attach it, and the log (`~/Games/DungeonSiege2Native/DungeonSiege2Native.log`), when reporting a
   problem.
-- **An update fails:** read `update.log` in the data folder; updating by hand (`git pull`, then `./install.sh`) always
-  works.
+- **An update fails:** read `update.log` in the data folder; retry by hand with `git pull` and the same install options (including
+  `--nightly` for Nightly). Build errors still need to be resolved.
 
 ## Tests
 
