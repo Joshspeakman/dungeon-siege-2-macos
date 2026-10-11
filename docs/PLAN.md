@@ -17,7 +17,7 @@ The following tables are the historical bring-up plan, not the current implement
 
 | Step | State |
 |---|---|
-| Survey of the GOG 2.3 release | done: see `LLM-Decomp-Guides/dungeon-siege-2` |
+| Survey of the GOG 2.3 release | done |
 | Analysis (`recomp/tools/analyze.py`) | 85,833 functions, 97.1% of `.text` (gap scanning repeated until nothing new; 479 jump tables resolved) |
 | Lifting (`recomp/tools/lift.py`) | all functions lifted, 0 internal errors; ~1,000 unsupported instructions, almost all SSE2 C-runtime paths a CPU without SSE2 skips, or data decoded as code; `lock cmpxchg` added |
 | Multi-image build (`recomp/build.sh`) | the game plus Miles (`mss32.dll`, `msssoft.m3d`, `mssmp3.asi`, `mssdsp.flt`) and Bink: 62,226 functions, compiles and links in about 4 minutes |

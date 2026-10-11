@@ -20,7 +20,7 @@ recomp/run.sh "/path/to/Dungeon Siege 2"
 | Direct3D 9 (`d3d9.c`, `d3d9_fmt.c`) on the Metal renderer (`../src/renderer`), D3DX textures (`d3dx9.c`) | working: fixed function, and the game's HLSL effects compiled to Metal (`hlsl.c`, `d3dx9_fx.c`) |
 | Miles 6.6g (`mss32.dll` and its providers) and Bink, recompiled from the game folder; DirectSound over Core Audio | working |
 | App bundle, installer (`../install.sh`), launch window (`host/launcher.m`) | working |
-| Multiplayer (DirectPlay 8, GameSpy lobby on OpenSpy) | switched back on: the lobby works with an original CD key; hosting and joining untested (`../docs/MULTIPLAYER.md`) |
+| Multiplayer (DirectPlay 8, GameSpy lobby on OpenSpy) | switched back on: LAN games (lobby, hosting, joining, playing together) work without a CD key, tested with two copies on one Mac; the internet lobby works with an original CD key, internet hosting and joining untested (`../docs/MULTIPLAYER.md`) |
 
 The recompiled game runs without Wine or Rosetta: intro, menus, new hero, the campaign, saving and loading.
 
@@ -68,7 +68,7 @@ chosen from.
 
 ## Verification and known gaps
 
-**Original-game comparison, 2026-10-10.** The [original-game reference](https://github.com/Joshspeakman/dungeon-siege-2-macos/issues/1)
+**Original-game comparison, 2026-10-10.** The reference in [issue 1](https://github.com/Joshspeakman/dungeon-siege-2-macos/issues/1)
 uses the original English GOG 2.3 executable under Wine 11.19, DXVK 2.5.1 and Microsoft's D3DX9_29 on an RTX 3080 Ti;
 it is not a native Windows capture. Its executable and all eight official resource archive hashes match this Mac.
 The supplied new Baseline character was loaded in an isolated profile at 800x600, Advanced shaders, Trilinear,
