@@ -2,8 +2,7 @@
 
 A panel for checking content and effects by hand: travel anywhere in the loaded map, spawn enemies and objects, give
 and equip gear, and cast every spell and power, with a log of what was asked, what the game answered and what you saw.
-It was written for the Linux port ([dungeon-siege-2-linux](https://github.com/Joshspeakman/dungeon-siege-2-linux));
-the Mac version shares its content reader and its commands (`recomp/host/test_lab/lab_content.py` and
+It was written for a Linux port of the game; the Mac version shares its content reader and its commands (`recomp/host/test_lab/lab_content.py` and
 `lab_commands.py`, the same files) and has its own window.
 
 ## Starting it
@@ -82,7 +81,7 @@ was checked with Advanced shaders in the tutorial, Northern Greilyn Jungle and S
 repeats each of fireball, iceball and lightning blast, with three spawned Skath Disciples, did not reproduce the
 previous full-screen white flash. A first series was obscured by a tutorial popup and was repeated after dismissing
 it. Brightness monitoring only flagged the startup fade; this does not establish that the intermittent flash is fixed.
-An original-game baseline from the reference host is still needed before claiming complete visual parity.
+An original-game baseline is still needed before claiming complete visual parity.
 
 The Metal buffer used when a vertex has no diffuse color now has a full 16-byte source. Previously it copied 16
 bytes from a 4-byte stack value. `renderer_init_test.m` forwards buffer creation through an instrumented CPU copy:
