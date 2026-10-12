@@ -1,7 +1,6 @@
-LOCAL REVIEW BUILD - 2026-10-12
-Not published to nightly.
+NIGHTLY FEATURE UPDATE - 2026-10-12
 
-Dungeon Siege: native environmental audio
+Dungeon Siege II: native environmental audio
 
 Choose Audio -> Environmental Audio -> EAX. Standard remains available; existing preferences and saves are preserved. The original Miles EAX provider is recompiled from your own game files and routes its DirectSound3D/EAX properties through native software mixing and Core Audio.
 
