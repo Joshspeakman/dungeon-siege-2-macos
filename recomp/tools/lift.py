@@ -469,7 +469,9 @@ class Lifter:
         o = i.operands; pc = i.address
         if mn == 'imul' and len(o) >= 2:
             s1 = self.rd(i, o[1] if len(o) == 2 else o[1]); s2 = self.rd(i, o[0]) if len(o) == 2 else self.rd(i, o[2], o[0].size)
-            if o[0].size != 4: raise Unsupported('imul16')
+            if o[0].size == 2:
+                return '{ int32_t p = (int32_t)(int16_t)%s * (int32_t)(int16_t)%s; uint32_t r = (uint16_t)p; %s flags_set(&f, (p != (int32_t)(int16_t)r) ? (F_CF | F_OF) : 0, F_CF | F_OF); }' % (s1, s2, self.wr(i, o[0], 'r'))
+            if o[0].size != 4: raise Unsupported('imul size')
             return '{ int64_t p = (int64_t)(int32_t)%s * (int64_t)(int32_t)%s; uint32_t r = (uint32_t)p; %s flags_set(&f, (p != (int64_t)(int32_t)r) ? (F_CF | F_OF) : 0, F_CF | F_OF); }' % (s1, s2, self.wr(i, o[0], 'r'))
         s = o[0]; sz = s.size; v = self.rd(i, s)
         if sz == 4:
@@ -502,6 +504,11 @@ class Lifter:
             return ('{ uint32_t ea = %s, src = %s, exp = eax, old = exp; '
                     '(void)__atomic_compare_exchange_n((uint32_t *)(M + ea), &old, src, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); '
                     'LF(LF_SUB, %d, exp, old, exp - old); eax = old; }') % (self.addr(i, o[0]), self.rd(i, o[1]), SZ[4])
+        if mn == 'xadd' and o[0].type == X.X86_OP_MEM and o[0].size in (1, 2, 4) and o[1].type == X.X86_OP_REG:
+            sz = o[0].size; t = {1: 'uint8_t', 2: 'uint16_t', 4: 'uint32_t'}[sz]
+            return ('{ uint32_t ea = %s, addend = %s; uint32_t old = __atomic_fetch_add((%s *)(M + ea), (%s)addend, __ATOMIC_SEQ_CST); '
+                    'uint32_t sum = (old + addend) & %s; %s LF(LF_ADD, %s, old, addend, sum); }') % (
+                    self.addr(i, o[0]), self.rd(i, o[1]), t, t, MASK[sz], self.wr(i, o[1], 'old'), SZ[sz])
         raise Unsupported('lock ' + mn)
 
     def string(self, mn, rep):

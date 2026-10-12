@@ -118,3 +118,9 @@ games.
 
 The aim is straightforward native builds without unwanted extras or a stack of translation layers. Forks and
 improvements are welcome.
+
+## Environmental audio checks
+
+`python3 recomp/tests/runtime_regressions_macos.py eax_mixer eax_reverb` runs the guest property/3D ABI and measured room-response checks under ASan/UBSan. `recomp/.venv/bin/python recomp/tests/locked_xadd_test.py` checks the provider's atomic XADD and 16-bit IMUL instruction lowering. `launcher_prefs_test.m` includes EAX preference round trips.
+
+`W32_EAXLOG=1` reports the selected Miles provider and dry/room activity; `W32_DSLOG=1` includes EAX property writes. A zero room send can be the game's explicit dry mix, not a failed provider. EAX 1.0/2.0 are supported; EAX 3+ extensions are not advertised. Provider unload/reload calls DllMain and restores fresh data so switching audio providers does not leave a stale registration.

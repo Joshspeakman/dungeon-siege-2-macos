@@ -99,7 +99,7 @@ and the window then shows the game's own logo.
 
 ## The launch window
 
-Opening the app shows the launch window first: the game's key art, the Game row, then Display, Graphics, Online and
+Opening the app shows the launch window first: the game's key art, the Game row, then Display, Graphics, Audio, Online and
 Updates as buttons that show what's chosen. Press **Play** (or Return); display choices are remembered. The Game row starts on Dungeon Siege II each time;
 choose Test Lab again when you want it.
 
@@ -112,6 +112,7 @@ choose Test Lab again when you want it.
 | Display → View Distance | **Original** · Far (125%) · Farther (150%, like SeeFar) · Very Far (200%) · Horizon (250%) · Maximum (300%) |
 | Display → Gamma, Notch | the game's brightness; on a Mac with a notch, **Hide the Notch** (the picture below the camera) or **Around the Notch** (the whole display) |
 | Graphics | the game's own Shaders (Game's Choice until one is picked, Off, Standard, Advanced), Shadows, Texture Filtering and Object Detail, written to its settings (`prefs.gas`), so its Video page needn't be used |
+| Audio → Environmental Audio | **Standard** · EAX (the game's environmental settings through native Core Audio) |
 | Online | the CD key for the internet lobby (only a hash of it is stored; **Remove Key** deletes it); LAN games need none |
 | Updates | the newest commit of the app's branch on GitHub; press to rebuild (below) |
 
@@ -122,6 +123,8 @@ changed). See [docs/TEST-LAB.md](docs/TEST-LAB.md).
 The first time you host or look for a multiplayer game, macOS asks whether Dungeon Siege II may find devices on your
 local network, and the firewall (if it is on) whether it may accept incoming connections. Allow both. **Cmd+Q** quits
 the game.
+
+EAX is implemented in software on the Mac: the original Miles provider feeds DirectSound3D and EAX 1.0/2.0 properties into the native mixer. Room decay, early reflections, high-frequency damping, source positioning, distance, cones, Doppler, obstruction and occlusion are processed before Core Audio output. The game controls which sounds enter the room effect, so dry areas and sounds remain dry. This reproduces the environmental behavior, not the exact sound of a particular Creative card. The setting is shared with the game's `eax_enabled` preference.
 
 ## Updating
 

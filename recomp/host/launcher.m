@@ -692,6 +692,11 @@ static BOOL update_run(NSWindow *parent, NSString *updater, NSString *branch, NS
     return ok;
 }
 
+static NSArray *eax_choices(void) {
+    return @[@{@"value": @"false", @"label": @"Standard", @"note": @"Original sound without environmental effects"},
+             @{@"value": @"true", @"label": @"EAX", @"note": @"Positional sound with room reflections and reverb"}];
+}
+
 /* Shows the launch window (modal) unless DS_NO_LAUNCHER is set; returns 0 to quit, 1 to play, 2/3 for the Test Lab.
  * DS_LAUNCHER_SHOT=<png> renders it to an image instead (development; DS_LAUNCHER_PAGE: a group opened). */
 int ds_launcher_run(const char *game_dir, const char *data_dir)
@@ -709,10 +714,11 @@ int ds_launcher_run(const char *game_dir, const char *data_dir)
     /* the game's own graphics options, from its prefs.gas */
     DSRow *shad = [DSRow new], *gsh = [DSRow new], *flt = [DSRow new], *det = [DSRow new], *gam = [DSRow new];
     shad.title = @"Shaders"; gsh.title = @"Shadows"; flt.title = @"Texture Filtering"; det.title = @"Object Detail"; gam.title = @"Gamma";
-    NSArray<DSRow *> *prefRows = @[shad, gsh, flt, det, gam];
-    NSArray<NSString *> *prefKeys = @[@"shaders", @"video_shadows", @"texture_filtering", @"object_detail_level", @"video_gamma"];
-    NSArray *(^prefChoices)(NSInteger) = ^NSArray *(NSInteger k) { return k == 0 ? shader_choices() : k == 1 ? game_shadow_choices() : k == 2 ? filtering_choices() : k == 3 ? detail_choices() : gamma_choices(); };
-    NSArray<NSNumber *> *prefDefault = @[@-1, @-1, @0, @4, @5];      /* as the game shipped (config/options.gas); -1: the game's choice */
+    DSRow *eaxRow = [DSRow new]; eaxRow.title = @"Environmental Audio";
+    NSArray<DSRow *> *prefRows = @[shad, gsh, flt, det, gam, eaxRow];
+    NSArray<NSString *> *prefKeys = @[@"shaders", @"video_shadows", @"texture_filtering", @"object_detail_level", @"video_gamma", @"eax_enabled"];
+    NSArray *(^prefChoices)(NSInteger) = ^NSArray *(NSInteger k) { return k == 0 ? shader_choices() : k == 1 ? game_shadow_choices() : k == 2 ? filtering_choices() : k == 3 ? detail_choices() : k == 4 ? gamma_choices() : eax_choices(); };
+    NSArray<NSNumber *> *prefDefault = @[@-1, @-1, @0, @4, @5, @0];      /* as the game shipped (config/options.gas); -1: the game's choice */
     NSString *pp = prefs_path(data); NSMutableDictionary *prefRead = [NSMutableDictionary dictionary];
     for (NSInteger k = 0; k < (NSInteger)prefRows.count; k++) {
         DSRow *row = prefRows[k]; NSString *v = prefs_get(pp, prefKeys[k]); if (v) prefRead[prefKeys[k]] = v;
@@ -744,13 +750,15 @@ int ds_launcher_run(const char *game_dir, const char *data_dir)
     upd.choices = update_choice(ustate, branch, built, nil);
     BOOL shotMode = shot != NULL;
     DSRow *online = [DSRow new]; online.title = @"Online"; online.choices = cdkey_choice(data);
+    DSSection *audio = [DSSection new]; audio.title = @"Audio"; audio.rows = @[eaxRow];
+    audio.summary = ^NSString * { return eaxRow.choices[eaxRow.index][@"label"]; };
     DSSection *display = [DSSection new], *graphics = [DSSection new], *onlineSec = [DSSection new], *updSec = [DSSection new];
     display.title = @"Display"; display.rows = notch_height() > 0 ? @[res, ui, notch, fps, dist, gam] : @[res, ui, fps, dist, gam];
     graphics.title = @"Graphics"; graphics.rows = @[shad, gsh, flt, det];
     onlineSec.title = @"Online"; onlineSec.summary = ^NSString * { NSDictionary *c = online.choices[online.index]; return [NSString stringWithFormat:@"%@ · LAN games need no key", c[@"label"]]; };
     updSec.title = @"Updates"; updSec.summary = ^NSString * { NSDictionary *c = upd.choices[upd.index]; return [c[@"note"] length] ? [NSString stringWithFormat:@"%@ · %@", c[@"label"], c[@"note"]] : c[@"label"]; };
     DSLaunchView *v = [[DSLaunchView alloc] initWithFrame:NSMakeRect(0, 0, 780, 760)];
-    v.top = @[mode]; v.sections = @[display, graphics, onlineSec, updSec]; v.open = -1; v.hover = v.pressed = HIT_NONE;
+    v.top = @[mode]; v.sections = @[display, graphics, audio, onlineSec, updSec]; v.open = -1; v.hover = v.pressed = HIT_NONE;
     __weak DSLaunchView *wv = v; __weak DSRow *wu = upd, *wo = online;
     onlineSec.activate = ^{ if (cdkey_panel(data)) wo.choices = cdkey_choice(data); };
     updSec.activate = ^{ if (wu.activate) wu.activate(); };
