@@ -17,11 +17,11 @@ EXE="$HERE/work/DungeonSiege2.exe"
 echo "== analysis"; "$PY" "$HERE/tools/analyze.py" "$EXE" "$HERE/work/analysis.json" | head -6
 echo "== lifting";  "$PY" "$HERE/tools/lift.py" "$EXE" "$HERE/work/analysis.json" "$OUT"
 # the Miles Sound System the game ships (system/mss32.dll and the providers it loads) and Bink, recompiled the same way;
-# game folder paths, so the build needs the folder the executable came from. Msseax.m3d (hardware EAX) is left out.
+# game folder paths, so the build needs the folder the executable came from. The EAX providers use the native DirectSound3D mixer.
 GAME="$(cd "$(dirname "$1")" && pwd)"; IMGS=("=")
 if [ -f "$GAME/system/mss32.dll" ]; then
   mkdir -p "$HERE/work/miles"; NIMP=$("$PY" -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["imports"]))' "$OUT/image.json")
-  for rel in system/mss32.dll system/mss/msssoft.m3d system/mss/mssmp3.asi system/mss/mssdsp.flt system/binkw32.dll; do
+  for rel in system/mss32.dll system/mss/msssoft.m3d system/mss/mssmp3.asi system/mss/mssdsp.flt system/binkw32.dll system/mss/Msseax.m3d; do
     tag=$(basename "$rel" | tr . _); [ -f "$GAME/$rel" ] || { echo "missing $GAME/$rel"; exit 1; }
     "$PY" "$HERE/tools/analyze.py" "$GAME/$rel" "$HERE/work/miles/$tag.json" | head -1
     "$PY" "$HERE/tools/lift.py" "$GAME/$rel" "$HERE/work/miles/$tag.json" "$OUT" --tag "$tag" --imp-base "$NIMP" | grep -E 'lifted|internal'
