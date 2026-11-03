@@ -1,5 +1,5 @@
 #!/bin/bash
-# install.sh --game-dir <Dungeon Siege II folder> [--app-dir DIR] [--data-dir DIR]
+# install.sh --game-dir <Dungeon Siege II folder> [--app-dir DIR] [--data-dir DIR] [--in-place]
 # install.sh --gog-installer <setup_dungeon_siege_2_*.exe>   (GOG offline installer; needs: brew install innoextract)
 # install.sh --cd-key                  multiplayer: asks for the product key of your own original retail copy (25
 #                                      characters, on the sticker under disc 1; the Steam and GOG releases come without
@@ -27,7 +27,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 GAME=""; GOG_EXE=""; APPS="$HOME/Applications"; DATA="$HOME/Games/DungeonSiege2Native"
 NIGHTLY=""; AS_NIGHTLY=""; CDKEY=""; REGFILE=""; ARGS=()
 GOG_SHA=c17e1cc9e01b5d2439a92e06b905040379ad4bb8618b822582c46f5fa29db4e2
+IN_PLACE=""
 while [ $# -gt 0 ]; do
+  case "$1" in --in-place) IN_PLACE=1; ARGS+=("$1"); shift; continue;; esac
   case "$1" in --nightly) NIGHTLY=1; shift; continue;; --as-nightly) AS_NIGHTLY=1; shift; continue;; --cd-key) CDKEY=1; shift; continue;; esac
   ARGS+=("$1"); [ $# -gt 1 ] && case "$1" in --*) case "$2" in --*) ;; *) ARGS+=("$2");; esac;; esac
   case "$1" in
@@ -123,6 +125,17 @@ mkdir -p "$APPS"; rm -rf "$A"; mkdir -p "$A/Contents/MacOS" "$A/Contents/Resourc
 cp "$HERE/recomp/work/full/app/DungeonSiegeNative" "$HERE/recomp/work/full/app/shaders.metal" "$HERE/recomp/work/full/app/dsr_snapshot.bin" "$A/Contents/MacOS/"
 cp "$HERE/recomp/work/DungeonSiege2.exe" "$A/Contents/Resources/DungeonSiege2.exe"
 mkdir -p "$A/Contents/Resources/test_lab"; cp "$HERE"/recomp/host/test_lab/*.py "$A/Contents/Resources/test_lab/"   # the Test Lab's helpers
+# The game is copied into the data folder (game-files) and the app reads it from there, so the folder it was installed
+# from is no longer needed and can be deleted. On a Mac the copy is an APFS clone: it takes no extra space. Updates and
+# reinstalls keep using the copy. --in-place reads the given folder instead (nothing is copied).
+if [ -z "$IN_PLACE" ]; then case "$GAME/" in "$DATA"/*) ;; *)
+  GF="$DATA/game-files"; echo "== copying the game from $GAME into $GF"
+  mkdir -p "$DATA"; rm -rf "$GF.part"
+  if [ "$(uname -s)" = Darwin ]; then cp -cRL "$GAME" "$GF.part" 2>/dev/null || { rm -rf "$GF.part"; cp -RL "$GAME" "$GF.part"; }
+  else cp -RL --reflink=auto "$GAME" "$GF.part"; fi
+  rm -rf "$GF"; mv "$GF.part" "$GF"
+  echo "== the app reads the game from $GF: $GAME is no longer needed (delete it to free the space)"; GAME="$GF";;
+esac; fi
 Q_GAME=$(printf '%q' "$GAME"); Q_DATA=$(printf '%q' "$DATA")      # shell-quoted: any folder name is only data
 # updates from the launcher: the branch this app follows (main, or nightly for Nightly), the commit it was built from and
 # the checkout it was installed from; its updater fetches the branch into a worktree there and rebuilds the app from it
