@@ -1,0 +1,67 @@
+{
+  "name": "Dungeon Siege II",
+  "folder": "Dungeon Siege II",
+  "bundle_id": "io.github.joshspeakman.dungeon-siege-2",
+  "release_repo": "Joshspeakman/dungeon-siege-2-macos",
+  "binary": "Dungeon Siege II",
+  "icon_label": "DS2",
+  "version": "2.3",
+  "where": "Your Dungeon Siege II folder (GOG, version 2.3)",
+  "minutes": 6,
+  "space_gb": 7,
+  "exe": "DungeonSiege2.exe",
+  "exe_sha256": {
+    "c17e1cc9e01b5d2439a92e06b905040379ad4bb8618b822582c46f5fa29db4e2": "GOG 2.3"
+  },
+  "required": [
+    "system/mss32.dll",
+    "system/binkw32.dll",
+    "system/mss/msssoft.m3d",
+    "system/mss/mssmp3.asi",
+    "system/mss/mssdsp.flt",
+    "system/mss/Msseax.m3d",
+    "Resources/Logic.ds2res",
+    "Resources/Objects.ds2res",
+    "Resources/Terrain.ds2res"
+  ],
+  "libs": [
+    {
+      "file": "system/mss32.dll"
+    },
+    {
+      "file": "system/mss/msssoft.m3d"
+    },
+    {
+      "file": "system/mss/mssmp3.asi"
+    },
+    {
+      "file": "system/mss/mssdsp.flt"
+    },
+    {
+      "file": "system/binkw32.dll"
+    },
+    {
+      "file": "system/mss/Msseax.m3d"
+    }
+  ],
+  "art_url": "https://cdn.cloudflare.steamstatic.com/steam/apps/39200/library_hero.jpg",
+  "log": "DungeonSiege2Native",
+  "local_network": "Dungeon Siege II hosts and joins multiplayer games on your local network.",
+  "build": "./build.sh \"$GAME/DungeonSiege2.exe\" && ./tools/build_app.sh \"$PWD/work/full\"",
+  "out": "work/full",
+  "rt_opt": "-O1",
+  "frameworks": [
+    "AppKit",
+    "Metal",
+    "QuartzCore",
+    "CoreText",
+    "CoreGraphics",
+    "CoreFoundation",
+    "AudioToolbox",
+    "CoreImage"
+  ],
+  "host_cflags": [],
+  "rt_cflags": [],
+  "style": "bronze",
+  "title": "DUNGEON SIEGE II"
+}
