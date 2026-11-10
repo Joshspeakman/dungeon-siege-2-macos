@@ -22,6 +22,8 @@ static char *thunk_name[MAX_THUNKS]; static ImpFn thunk_fn[MAX_THUNKS]; static u
 static uint32_t thunk_target[MAX_THUNKS];      /* import served by a recompiled DLL: its export's guest address */
 struct rt_image { const char *name; uint32_t base, imp_first, imp_count; };
 extern const struct rt_image rt_images[]; extern const unsigned rt_images_n;
+static uint32_t image_dynamic_refs[64], image_size[64];
+static uint8_t image_pinned[64], image_reserved[64];
 static uint8_t image_loaded[64], image_inited[64], image_ref[64];   /* mapped / DllMain done / loaded by the game */
 static pthread_mutex_t thunk_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -74,7 +76,19 @@ void w32_crash_record_call(uint32_t index);
 void rt_import(Ctx *c, uint32_t index)
 {
     w32_crash_record_call(index);
-    if (index < MAX_THUNKS && thunk_target[index]) { rt_call(c, thunk_target[index]); return; }
+    if (index < MAX_THUNKS && thunk_target[index]) {
+        const char *name = thunk_name[index];
+        static int audio_trace=-1; if(audio_trace<0)audio_trace=getenv("W32_EAXLOG")!=NULL;
+        int trace = audio_trace && name && (strstr(name, "enumerate_3D_providers") || strstr(name, "open_3D_provider"));
+        uint32_t args[3]; if (trace) for (int i=0;i<3;i++) args[i]=rt_r32(G_MEM,c->esp+4+4*i);
+        rt_call(c, thunk_target[index]);
+        if (trace) {
+            fprintf(stderr,"miles: %s -> %u",name,c->eax);
+            if (strstr(name,"enumerate") && c->eax) fprintf(stderr," (%s)",GS(rt_r32(G_MEM,args[2])));
+            fputc('\n',stderr);
+        }
+        return;
+    }
     w32_trace_import(c, index);
     if (!text_trace_init) { text_trace_init = 1; const char *p = getenv("W32_TRACE"); if (p && (text_trace = fopen(p, "w"))) setvbuf(text_trace, 0, _IOLBF, 0); }   /* lines survive an abrupt exit */
     static const char *tfilter; static int tf_init;                       /* W32_TRACE_ONLY=wsock32,kernel32!CreateFile: only those */
@@ -128,12 +142,17 @@ uint32_t w32_callback(Ctx *c, uint32_t fn, int nargs, const uint32_t *args)
 }
 
 /* ---- threads: TEB with static TLS ---- */
-static uint32_t nteb; static pthread_mutex_t teb_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint32_t next_tid = 0x100, teb_tls[MAX_THREADS];
+static unsigned char teb_used[MAX_THREADS]; static pthread_mutex_t teb_lock = PTHREAD_MUTEX_INITIALIZER;
 uint32_t w32_tid(Ctx *c) { return rt_r32(G_MEM, c->fs_base + 0x24); }
 void w32_set_last_error(Ctx *c, uint32_t e) { rt_w32(G_MEM, c->fs_base + 0x34, e); }
 uint32_t w32_new_thread_teb(uint32_t stack_lo, uint32_t stack_hi)
 {
-    pthread_mutex_lock(&teb_lock); uint32_t k = nteb < MAX_THREADS ? nteb++ : MAX_THREADS; pthread_mutex_unlock(&teb_lock);
+    pthread_mutex_lock(&teb_lock);
+    uint32_t k = 0; while (k < MAX_THREADS && teb_used[k]) k++;
+    uint32_t tid = next_tid;
+    if (k < MAX_THREADS) { teb_used[k] = 1; next_tid += 4; }
+    pthread_mutex_unlock(&teb_lock);
     if (k >= MAX_THREADS) return 0;
     uint32_t teb = TEB_BASE + k * 0x2000, tlsarr = teb + 0x1000;
     memset(G_MEM + teb, 0, 0x2000);
@@ -141,15 +160,30 @@ uint32_t w32_new_thread_teb(uint32_t stack_lo, uint32_t stack_hi)
     rt_w32(G_MEM, teb + 0x04, stack_hi); rt_w32(G_MEM, teb + 0x08, stack_lo);
     rt_w32(G_MEM, teb + 0x18, teb);
     rt_w32(G_MEM, teb + 0x20, 0x40);                 /* process id */
-    rt_w32(G_MEM, teb + 0x24, 0x100 + 4 * k);        /* thread id */
+    rt_w32(G_MEM, teb + 0x24, tid);                  /* thread id, independent of the reusable TEB */
     rt_w32(G_MEM, teb + 0x2c, tlsarr);
     rt_w32(G_MEM, teb + 0x30, PEB_ADDR);
     if (w32_tls_size || w32_tls_zero) {
         uint32_t blk = heap_alloc(w32_process_heap, 8, w32_tls_size + w32_tls_zero);
+        if (!blk) {
+            pthread_mutex_lock(&teb_lock); teb_used[k] = 0; pthread_mutex_unlock(&teb_lock);
+            return 0;
+        }
+        teb_tls[k] = blk;
         memcpy(G_MEM + blk, G_MEM + w32_tls_template, w32_tls_size);
         rt_w32(G_MEM, tlsarr + 4 * rt_r32(G_MEM, w32_tls_index_addr), blk);
     }
     return teb;
+}
+
+void w32_free_thread_teb(uint32_t teb)
+{
+    uint32_t k = (teb - TEB_BASE) / 0x2000;
+    if (teb < TEB_BASE || k >= MAX_THREADS) return;
+    uint32_t stack = rt_r32(G_MEM, teb + 8);
+    if (teb_tls[k]) { heap_free(w32_process_heap, teb_tls[k]); teb_tls[k] = 0; }
+    if (stack) vm_free(stack, 0, 0x8000);
+    pthread_mutex_lock(&teb_lock); teb_used[k] = 0; pthread_mutex_unlock(&teb_lock);
 }
 
 /* ---- image ---- */
@@ -287,7 +321,7 @@ static void bind_imports(int k)
             const char *m = getenv("W32_MILES"); if (m && !strcmp(m, "native")) t = -1;
         }
         if (t > 0 && load_image(t) == 0) {
-            image_ref[t] = 1;
+            image_ref[t] = 1; image_pinned[t] = 1;
             uint32_t a = bang[1] == '#' ? w32_export(rt_images[t].base, 0, (uint32_t)atoi(bang + 2)) : w32_export(rt_images[t].base, bang + 1, 0);
             if (a) thunk_target[j] = a; else fprintf(stderr, "w32: %s not exported by %s\n", bang + 1, rt_images[t].name);
         }
@@ -306,7 +340,9 @@ static int load_image(int k)
     uint32_t pe = *(uint32_t *)(d + 0x3c), opt = pe + 24, size = *(uint32_t *)(d + opt + 56);
     uint16_t nsec = *(uint16_t *)(d + pe + 6), optsz = *(uint16_t *)(d + pe + 20);
     if (*(uint32_t *)(d + opt + 28) != im->base) { fprintf(stderr, "w32: %s: unexpected base\n", im->name); free(d); return -1; }
-    vm_register(im->base, (size + 0xffff) & ~0xffffu, 0x1000000);
+    if (!image_reserved[k]) { vm_register(im->base, (size + 0xffff) & ~0xffffu, 0x1000000); image_reserved[k]=1; }
+    image_size[k] = size;
+    memset(G_MEM + im->base, 0, size); /* fresh .data/.bss on a provider reload */
     memcpy(G_MEM + im->base, d, *(uint32_t *)(d + opt + 60));
     for (int s = 0; s < nsec; s++) {
         uint8_t *h = d + opt + optsz + 40 * s;
@@ -326,7 +362,7 @@ static void init_image(Ctx *c, int k)
     image_inited[k] = 1;
     const struct rt_image *im = &rt_images[k];
     for (uint32_t j = im->imp_first; j < im->imp_first + im->imp_count; j++) if (thunk_target[j]) {
-        for (unsigned t = 1; t < rt_images_n; t++) if (thunk_target[j] >= rt_images[t].base && thunk_target[j] < rt_images[t].base + 0x01000000u) init_image(c, (int)t);
+        for (unsigned t = 1; t < rt_images_n; t++) if (image_loaded[t] && thunk_target[j] >= rt_images[t].base && thunk_target[j] - rt_images[t].base < image_size[t]) init_image(c, (int)t);
     }
     uint32_t pe = im->base + rt_r32(G_MEM, im->base + 0x3c), ep = rt_r32(G_MEM, pe + 24 + 16);
     if (ep) { uint32_t a[3] = {im->base, 1, 0}; uint32_t r = w32_callback(c, im->base + ep, 3, a); if (!r) fprintf(stderr, "w32: %s DllMain failed\n", im->name); }
@@ -345,8 +381,25 @@ uint32_t w32_load_library(Ctx *c, const char *name)
 {
     int k = image_index(name);
     if (k < 0 || load_image(k)) return 0;
-    image_ref[k] = 1; init_image(c, k);
+    image_dynamic_refs[k]++; image_ref[k] = 1; init_image(c, k);
     return rt_images[k].base;
 }
 uint32_t w32_image_module(const char *name) { int k = image_index(name); return k > 0 && image_ref[k] ? rt_images[k].base : 0; }
 const char *w32_image_name(uint32_t base) { for (unsigned k = 1; k < rt_images_n; k++) if (rt_images[k].base == base && image_ref[k]) return rt_images[k].name; return 0; }
+
+/* Miles shuts down and reopens its providers when EAX changes. A no-op
+ * FreeLibrary leaves their registration guard set after RIB unregisters them. */
+int w32_free_library(Ctx *c, uint32_t base)
+{
+    for(unsigned k=1;k<rt_images_n;k++) if(rt_images[k].base==base) {
+        if(!image_dynamic_refs[k])return image_pinned[k]!=0;
+        if(--image_dynamic_refs[k] || image_pinned[k])return 1;
+        if(image_inited[k]) {
+            uint32_t pe=base+rt_r32(G_MEM,base+0x3c),entry=rt_r32(G_MEM,pe+24+16);
+            if(entry){uint32_t a[3]={base,0,0};w32_callback(c,base+entry,3,a);}
+        }
+        image_inited[k]=image_loaded[k]=image_ref[k]=0;
+        return 1;
+    }
+    return 1; /* runtime-owned system modules remain resident */
+}

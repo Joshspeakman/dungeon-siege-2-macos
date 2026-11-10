@@ -46,6 +46,10 @@ int main(void)
         r.choices = shader_choices(); CHECK(pref_index(r, @"advanced", 0) == 2 && pref_index(r, @"standard", 0) == 1);
         CHECK([prefs_get(p, @"shaders") isEqualToString:@"advanced"]);
         CHECK([prefs_path(@"/x") isEqualToString:@"/x/drive_c/Users/player/Documents/My Games/Dungeon Siege 2/Save/prefs.gas"]);
+        r.choices = eax_choices();
+        CHECK(pref_index(r, @"false", 0) == 0 && pref_index(r, @"true", 0) == 1);
+        prefs_set(p, @{@"eax_enabled": @"true"}); CHECK([prefs_get(p, @"eax_enabled") isEqualToString:@"true"]);
+        prefs_set(p, @{@"eax_enabled": @"false"}); CHECK([prefs_get(p, @"eax_enabled") isEqualToString:@"false"]);
         [NSFileManager.defaultManager removeItemAtPath:dir error:nil];
         printf(fails ? "launcher_prefs_test: %d failed\n" : "launcher_prefs_test: all passed\n", fails);
     }
