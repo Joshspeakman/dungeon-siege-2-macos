@@ -2,11 +2,20 @@
 
 Dungeon Siege II (GOG release 2.3), statically recompiled from your own copy into native arm64 code and run on Metal,
 as [dungeon-siege-macos](https://github.com/Joshspeakman/dungeon-siege-macos) does for Dungeon Siege 1. No Wine, no
-Rosetta, no emulator. Nothing from the game is in this repository: the build regenerates everything locally from your
-copy, and the game folder is only read.
+Rosetta, no emulator. Nothing from the game is in this repository or in the download: the app is built locally from
+your copy, and your game folder is only read. There are two ways to install:
 
-**Status: beta** ([releases](https://github.com/Joshspeakman/dungeon-siege-2-macos/releases)). Single player is
-playable:
+- **Download the app** ([Releases](https://github.com/Joshspeakman/dungeon-siege-2-macos/releases)): drag it to
+  Applications, open it and drop your Dungeon Siege II folder on it. It checks your copy, builds the game on your Mac
+  in about six minutes and starts it. No developer tools, no Terminal. See [Install the app](#install-the-app).
+- **Build from source** with `./install.sh` (below): also installs straight from the GOG offline installer, and
+  installs the Nightly app.
+
+**Status: beta.** [Beta 3](https://github.com/Joshspeakman/dungeon-siege-2-macos/releases/tag/beta-3) is the first
+drag-and-drop download: a ready-made app with a setup window in the game's look that builds the game from the folder
+you drop on it, and updates itself from the [releases page](https://github.com/Joshspeakman/dungeon-siege-2-macos/releases).
+It also adds native EAX environmental audio (the launch window's Audio row) and runtime fixes for multiplayer
+(connections and sockets). Single player is playable:
 
 - the main menu, hero creation, the intro movie and opening cutscene;
 - gameplay: the world, characters, the HUD, dialogue, combat, spells and powers; saving and loading;
@@ -17,6 +26,8 @@ playable:
 - sound (Miles) and movies (Bink), recompiled from the DLLs in your game folder;
 - multiplayer switched back on (the GOG release disables it): LAN games (host, join, play together) with no CD key and
   no online service; the internet lobby signs in to OpenSpy with an original retail CD key.
+
+From source:
 
 ```sh
 xcode-select --install                     # once: clang, git and python3
@@ -29,7 +40,9 @@ open ~/Applications/"Dungeon Siege II Native.app"
 ## Requirements
 
 - A Mac with **Apple Silicon** (M1 or later). The installer stops on an Intel Mac. The app needs **macOS 13** or newer.
-- The **Xcode Command Line Tools**: `xcode-select --install` (installs `clang`, `git` and `python3`). The full Xcode
+- About 7 GB free for the downloaded app's copy of the game and the built game code (from the same disk the copy is an
+  APFS clone, which takes almost no space).
+- Only to build from source: the **Xcode Command Line Tools**: `xcode-select --install` (installs `clang`, `git` and `python3`). The full Xcode
   isn't needed.
 - On the first build the recompiler makes a Python environment in `recomp/.venv` and installs `capstone` and `unicorn`
   into it with pip, so the first install needs an internet connection.
@@ -47,17 +60,54 @@ open ~/Applications/"Dungeon Siege II Native.app"
   The Steam release, retail discs, other patch levels, modified executables and the Broken World expansion (a separate
   executable) are not supported.
 
+## Install the app
+
+1. Download `Dungeon-Siege-II.dmg` from the newest
+   [release](https://github.com/Joshspeakman/dungeon-siege-2-macos/releases), open it and drag **Dungeon Siege II** to
+   Applications.
+2. Open it. The first time, macOS stops it, because the app isn't signed with a paid Apple developer certificate:
+   click Done, open System Settings → Privacy & Security, scroll down and click **Open Anyway** next to Dungeon Siege
+   II. This is needed once.
+3. A setup window in the game's look asks for your game. Give it your Dungeon Siege II folder (GOG 2.3, the one that
+   holds `DungeonSiege2.exe`) any of three ways:
+   - drop the folder onto the window;
+   - drop it onto the app's icon (in the Dock or in Applications);
+   - or put it in `~/Games/Dungeon Siege II/Put Game Files Here` (the window shows that folder) and open the app again.
+
+   It takes an installed or unpacked game folder, not GOG's offline installer (`setup_dungeon_siege_2_*.exe`): unpack
+   that first (`innoextract` does it on a Mac), or build from source with `--gog-installer`.
+4. The app checks `DungeonSiege2.exe` and the game's files and says what's wrong if anything is. Then it copies the
+   game into `~/Games/Dungeon Siege II/game-files`, builds the game's code for your Mac with the compiler it carries
+   (about 6 minutes on an M1 Pro) and opens the launch window. It offers to move the folder you dropped to the Trash;
+   it no longer needs it.
+
+That happens once. Later launches go straight to the launch window; if an update changes the game code, the next
+launch rebuilds it by itself.
+
+| What | Where (downloaded app) |
+|---|---|
+| The app | `/Applications/Dungeon Siege II.app` (or wherever you dragged it) |
+| Your game, copied | `~/Games/Dungeon Siege II/game-files` |
+| The built game code | `~/Games/Dungeon Siege II/recomp` |
+| Saves and the game's settings | `~/Games/Dungeon Siege II/drive_c/Users/player/Documents/My Games/Dungeon Siege 2` |
+| Launch window settings, CD-key hash, log, crash reports | `~/Games/Dungeon Siege II` |
+
+Saves from an app built from source can be copied into the saves folder above.
+
 ## Getting the game files onto the Mac
+
+For a source build:
 
 | You have | Command |
 |---|---|
 | The GOG offline installer (`setup_dungeon_siege_2_*.exe`, from your GOG library's "offline backup game installers") | `./install.sh --gog-installer ~/Downloads/setup_dungeon_siege_2_*.exe`: unpacked with `innoextract` into the data folder (`gog-extract`), and the app reads the game from there |
 | The game installed or unpacked somewhere (for example copied from a Windows PC) | `./install.sh --game-dir "/path/to/Dungeon Siege 2"` (the folder that holds `DungeonSiege2.exe`) |
 
-With `--game-dir` the app remembers that folder and reads the game's data from it every time it starts, so leave it
-where it is. It is never changed.
+The game is copied into the data folder (`game-files`; from the same disk an APFS clone, which takes almost no space),
+so the folder you named can be deleted afterwards; `--in-place` reads it there instead, and then it has to stay. It
+is never changed.
 
-## Installing
+## Build from source
 
 ```sh
 git clone https://github.com/Joshspeakman/dungeon-siege-2-macos.git
@@ -82,7 +132,8 @@ Every `install.sh` option:
 | `--cd-key --reg-file FILE` | Write that hash as a `.reg` file for a Windows (or Wine/Proton) player to import instead. Nothing on this Mac changes. |
 | `--nightly` | Install **Dungeon Siege II Nightly.app** next to the stable app, built from the `nightly` branch (see *Updating*). |
 | `--app-dir DIR` | Where the app goes (default `~/Applications`). See the updater limitation below. |
-| `--data-dir DIR` | Where saves, settings and logs go (default `~/Games/DungeonSiege2Native`). See the updater limitation below. |
+| `--data-dir DIR` | Where saves, settings, logs and the copy of the game go (default `~/Games/DungeonSiege2Native`). See the updater limitation below. |
+| `--in-place` | Read the game from `--game-dir` instead of copying it into the data folder (that folder then has to stay). |
 
 With no game option, `install.sh` rebuilds from the game folder the installed app already uses. The install downloads
 the launch window's banner (Dungeon Siege II's key art from Steam's store) for your Mac; `DS_NO_DOWNLOADS=1` skips it,
@@ -92,7 +143,7 @@ and the window then shows the game's own logo.
 
 | Location | Contents |
 |---|---|
-| Your game folder | Only read, never changed. |
+| Your game folder | Only read, never changed; copied into `<data>/game-files` (unless `--in-place`), so it can be deleted. |
 | `~/Applications/Dungeon Siege II Native.app` | The recompiled game, built on your Mac from your copy. |
 | `~/Games/DungeonSiege2Native` | The data folder: saves and the game's settings (`drive_c/Users/player/Documents/My Games/Dungeon Siege 2`; multiplayer parties in `Save/MultiPlayer`), the launch window's choices, the stored CD-key hash (`cdkey-hash.txt`), the log (`DungeonSiege2Native.log`), update output (`update.log`), crash reports (`CrashReports/`), the Test Lab's own copy of your saves (`test-lab/`), and the unpacked game for `--gog-installer`. |
 | The cloned repository | The recompiler, its Python environment (`recomp/.venv`), the generated code (`recomp/work`, never committed) and the update builds (`build/stable`, `build/nightly`). |
@@ -114,7 +165,7 @@ choose Test Lab again when you want it.
 | Graphics | the game's own Shaders (Game's Choice until one is picked, Off, Standard, Advanced), Shadows, Texture Filtering and Object Detail, written to its settings (`prefs.gas`), so its Video page needn't be used |
 | Audio → Environmental Audio | **Standard** · EAX (the game's environmental settings through native Core Audio) |
 | Online | the CD key for the internet lobby (only a hash of it is stored; **Remove Key** deletes it); LAN games need none |
-| Updates | the newest commit of the app's branch on GitHub; press to rebuild (below) |
+| Updates | the downloaded app: whether a newer release is out (press to install it); built from source: the newest commit of the app's branch on GitHub (press to rebuild). See below |
 
 **Test Lab** (the Game row): the game in a window beside a panel that travels anywhere in the map, spawns enemies,
 gives gear and casts every spell and power, with a record of each test, on copies of your saves (yours are never
@@ -128,7 +179,12 @@ EAX is implemented in software on the Mac: the original Miles provider feeds Dir
 
 ## Updating
 
-**From the app:** the launch window's **Updates** row asks GitHub for the newest commit of the app's branch: `main` for
+**The downloaded app** updates from the releases page: the launch window's **Updates** row shows when a newer release
+(betas included) is out, and pressing it downloads that release and swaps it in. Your game copy, saves, settings and
+CD key stay; if the new release changes the game code, the next launch rebuilds it from your copy. If the app sits
+somewhere it can't write to, download the new release and drag it in instead.
+
+**An app built from source:** the launch window's **Updates** row asks GitHub for the newest commit of the app's branch: `main` for
 *Dungeon Siege II*, `nightly` for *Dungeon Siege II Nightly*. When it says **Update available**, press it. The new
 version is checked out into `build/stable` (or `build/nightly`) inside your clone, the app is rebuilt from your copy of
 the game (with a progress window), and offers a Restart button when it finishes.
@@ -153,7 +209,10 @@ settings); each keeps its own log. Run it again, or use its Updates row, to upda
 
 ## Uninstalling
 
-Delete `~/Applications/Dungeon Siege II Native.app` (and `Dungeon Siege II Nightly.app`), the cloned folder, and
+The downloaded app: move `Dungeon Siege II.app` to the Trash, and `~/Games/Dungeon Siege II` too if you no longer want
+your saves and the game copy.
+
+Built from source: delete `~/Applications/Dungeon Siege II Native.app` (and `Dungeon Siege II Nightly.app`), the cloned folder, and
 `~/Games/DungeonSiege2Native` if you no longer want your saves. Your game folder was never changed.
 
 ## Multiplayer
@@ -189,6 +248,11 @@ Open issues: [github.com/Joshspeakman/dungeon-siege-2-macos/issues](https://gith
 
 ## Troubleshooting
 
+- **macOS says the downloaded app "can't be opened" or "is damaged":** it's unsigned, so use System Settings → Privacy &
+  Security → Open Anyway (see [Install the app](#install-the-app)). "Damaged" means the download was cut short:
+  download it again.
+- **The setup window says the folder isn't Dungeon Siege II 2.3, or names a missing file:** drop the installed (or
+  unpacked) GOG 2.3 folder that holds `DungeonSiege2.exe`.
 - **"... is not the GOG Dungeon Siege II 2.3 release"** (or "not the original GOG 2.3 DungeonSiege2.exe"): the folder
   holds another version of the game (Steam, disc, another patch level, or a modified executable).
 - **"no DungeonSiege2.exe in ..."**: give `--game-dir` the folder that holds `DungeonSiege2.exe`.
