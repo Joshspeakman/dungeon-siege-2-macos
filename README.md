@@ -325,3 +325,9 @@ legally obtained copy, and the app reads the game's data from that copy at run t
 protection or work around the CD-key check. Dungeon Siege II is a trademark of its respective owners; this project is
 not affiliated with them. The project's own code is MIT-licensed ([LICENSE](LICENSE)); credits are in
 [NOTICE.md](NOTICE.md).
+
+## Support
+
+If you get some use out of this, you can buy me a coffee on Ko-fi.
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/speakerjosh)
