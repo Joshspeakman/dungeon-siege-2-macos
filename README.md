@@ -1,5 +1,7 @@
 # Dungeon Siege II for Apple Silicon Macs
 
+![Dungeon Siege II, native on Apple Silicon](media/hero.jpg)
+
 Dungeon Siege II (GOG release 2.3), statically recompiled from your own copy into native arm64 code and run on Metal,
 as [dungeon-siege-macos](https://github.com/Joshspeakman/dungeon-siege-macos) does for Dungeon Siege 1. No Wine, no
 Rosetta, no emulator. Nothing from the game is in this repository or in the download: the app is built locally from
@@ -36,6 +38,13 @@ git clone https://github.com/Joshspeakman/dungeon-siege-2-macos.git && cd dungeo
 #   or: ./install.sh --game-dir "/path/to/Dungeon Siege 2"
 open ~/Applications/"Dungeon Siege II Native.app"
 ```
+
+## Screenshots
+
+| | |
+|---|---|
+| ![The launch window](media/screenshots/screenshot-launcher.png) | ![Treetop walkway](media/screenshots/screenshot-01-treetop-walkway.jpg) |
+| ![Treetop bridges](media/screenshots/screenshot-02-treetop-bridges.jpg) | ![Character select](media/screenshots/screenshot-04-character-select.jpg) |
 
 ## Requirements
 
