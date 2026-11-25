@@ -58,8 +58,10 @@
     "CoreGraphics",
     "CoreFoundation",
     "AudioToolbox",
-    "CoreImage"
+    "CoreImage",
+    "GameController"
   ],
+  "art": ["ds2_art.py", "{game}", "{art}", "--store"],
   "host_cflags": [],
   "rt_cflags": [],
   "style": "bronze",

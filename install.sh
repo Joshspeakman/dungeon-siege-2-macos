@@ -221,6 +221,14 @@ if [ -z "${DS_NO_DOWNLOADS:-}" ] && [ ! -s "$DATA/art/banner.jpg" ]; then
     mv "$f.part" "$f"; echo "== the launcher's banner: Dungeon Siege II's key art, from Steam's store"
   else rm -f "$f.part"; echo "   (the launcher's banner couldn't be downloaded; the window shows the game's logo)"; fi
 fi
+# the launch window's art (recomp/tools/ds2_art.py): frames of the game's own cutscenes (its Bink movies, with ffmpeg when
+# it is installed) and Steam's capsule and screenshots (skipped with DS_NO_DOWNLOADS=1 or offline); what is there is kept
+if [ -d "$GAME" ]; then
+  STORE_ART=--store; [ -n "${DS_NO_DOWNLOADS:-}" ] && STORE_ART=""
+  if python3 "$HERE/recomp/tools/ds2_art.py" "$GAME" "$DATA/art" $STORE_ART >/dev/null 2>&1; then
+    echo "== the launcher's art: $(ls "$DATA/art" | grep -c '^scene-') frames of the game's cutscenes$(command -v ffmpeg >/dev/null || echo ' (none: install ffmpeg for them)')"
+  fi
+fi
 echo "== done: $A (data in $DATA)"
 # online play needs the player's own CD key: offered once, on an interactive install (not by the launcher's updater)
 if [ ! -f "$DATA/cdkey-hash.txt" ] && [ -t 0 ] && [ -z "$AS_NIGHTLY$CDKEY" ]; then

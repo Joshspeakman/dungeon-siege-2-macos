@@ -51,9 +51,10 @@ static NSDictionary *game_config(void)
     NSData *d = [NSData dataWithContentsOfFile:p]; config_path = p;
     return d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
 }
+static NSString *user_home(void) { const char *h = getenv("HOME"); return h && *h ? @(h) : NSHomeDirectory(); }   /* $HOME (tests point it elsewhere) */
 static NSString *game_root(NSDictionary *cfg)
 {
-    return [[NSHomeDirectory() stringByAppendingPathComponent:@"Games"] stringByAppendingPathComponent:cfg[@"folder"]];
+    return [[user_home() stringByAppendingPathComponent:@"Games"] stringByAppendingPathComponent:cfg[@"folder"]];
 }
 /* game.json's "inside": where the game sits in a store's wrapper that `here` may be (the Mac Steam releases of GTA III and
  * San Andreas: <game>.app/Contents/Resources/transgaming/c_drive/...); the folder holding the executable, or nil */
@@ -146,7 +147,7 @@ static NSString *package_in(NSString *folder, NSDictionary *cfg)   /* the packag
  * places in the home folder and other disks. game.json's "search" adds folder names to look for first. */
 static NSArray<NSString *> *search_roots(void)
 {
-    NSFileManager *fm = NSFileManager.defaultManager; NSString *home = NSHomeDirectory();
+    NSFileManager *fm = NSFileManager.defaultManager; NSString *home = user_home();
     NSMutableArray *roots = [NSMutableArray array];
     NSString *steam = [home stringByAppendingPathComponent:@"Library/Application Support/Steam"];
     NSMutableOrderedSet *libs = [NSMutableOrderedSet orderedSetWithObject:steam];
